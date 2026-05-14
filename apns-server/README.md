@@ -1,240 +1,173 @@
-# Cc APNs Server v0.1
+# CcCompanion APNs Server
+
+Python HTTP server, runs on your Mac. Forwards chat messages between your iPhone (CcCompanion app) and a local `tmux` session running `claude` (Claude Code CLI). Pushes Claude's replies back to your iPhone via APNs (or Bark fallback).
+
+This is **not** a managed service. You run it on your own machine, your data never leaves your local network (except for the push notification preview, which goes through Apple APNs or Bark relay).
+
+---
 
 ## Supported Regions Policy
 
-This project uses Anthropic Claude API. **Mainland China is NOT in Anthropic's officially supported regions list.** China users connecting via VPN may experience unstable connections and risk account suspension under Anthropic's Terms of Service. Use at your own discretion.
+This project relies on Anthropic's Claude API / Claude Code. **Mainland China is NOT in Anthropic's officially supported regions list.** China users connecting via VPN may experience unstable connections and risk account suspension under Anthropic's Terms of Service. Use at your own discretion.
 
-For security, this server ships with `strict_auth=true` and `allow_remote_control=false` by default. Do NOT expose port 8795 to the public internet without a HTTPS reverse proxy (Caddy/Nginx) in front of it.
-
----
-
-Mac mini 端 Live Activity push 服务. SPOKE 时 mini 主动 push 给 iPhone 灵动岛.
+For security, this server ships with `strict_auth = true` and `allow_remote_control = false` by default. Do **NOT** expose port 8795 to the public internet without a HTTPS reverse proxy (Caddy / Nginx / Traefik) in front.
 
 ---
 
-## 架构
-
-### 2026-05-13 OTS + CcCompanion rollback
-
-OTS 主 app 和 CcCompanion 公开版客户端都回退为直连本 apns-server 的原生 HTTP endpoints。聊天、推送、日记、收藏、时间线、任务等能力继续由 `push.py` 和本目录下的 store 模块提供，不再经过外部 chat bridge 中间层。
+## Architecture
 
 ```
-Mac mini                                 iPhone
-┌──────────────────────────────┐        ┌─────────────────────────────┐
-│ ~/scripts/cc_push_to_phone │        │ CcCompanion app           │
-│  ↓ HTTP POST                 │        │  Activity.pushTokenUpdates  │
-│ apns-server (8795)           │ ───→   │  Live Activity 启动 → token │
-│  ↓ HTTPS POST + JWT          │ APNs   │  灵动岛更新                  │
-│ api.push.apple.com           │        │                             │
-└──────────────────────────────┘        └─────────────────────────────┘
-                                              ↑
-                                              │ POST /register-token
-                                              │ POST /unregister-token
-                                              │ (反向回 mini 上报 token)
-                                              └─────────
+              ┌──────────────────────────┐
+              │  iPhone running ccc app  │
+              └─────────────┬────────────┘
+                            │  HTTPS poll + APNs push
+                            │  (or Bark fallback)
+              ┌─────────────▼────────────┐
+              │  Mac running apns-server │
+              │  (this directory)        │
+              └─────────────┬────────────┘
+                            │  tmux send-keys / capture-pane
+              ┌─────────────▼────────────┐
+              │  tmux session "opia"     │
+              │  └ claude (CLI agent)    │
+              └──────────────────────────┘
 ```
+
+`/chat/send` accepts a message from iPhone, injects into the `tmux` session, captures the reply, persists to `chat_history.jsonl`, and pushes the reply preview back to iPhone via APNs (or Bark).
 
 ---
 
-## 端点
+## Endpoints (主要)
 
-| 方法 | 路径 | 用途 | 鉴权 |
-|---|---|---|---|
-| GET | `/health` | 健康检查 | 无 |
-| GET | `/tokens` | 看当前 active tokens | shared_secret |
-| POST | `/register-token` | iPhone 上报 token | 无 (公开) |
-| POST | `/unregister-token` | iPhone 上报 end | 无 (公开) |
-| POST | `/push` | 触发 push 给所有 active iPhone | shared_secret |
+| Method | Path                  | Use                                        | Auth          |
+|--------|-----------------------|--------------------------------------------|---------------|
+| GET    | `/health`             | Health probe                               | none          |
+| GET    | `/version`            | Server version                             | none          |
+| POST   | `/chat/send`          | iPhone sends a chat message                | shared_secret |
+| GET    | `/chat/history`       | iPhone fetches history                     | shared_secret |
+| GET    | `/chain/sessions`     | List tmux sessions                         | shared_secret |
+| POST   | `/chain/new_session`  | Create new tmux session                    | shared_secret |
+| POST   | `/chain/switch`       | Set active tmux session                    | shared_secret |
+| POST   | `/chain/abort`        | Send Ctrl+C to abort current reply         | shared_secret |
+| POST   | `/tmux/send`          | Inject keys into a tmux session            | shared_secret |
+| POST   | `/register-device-token` | iPhone reports its APNs device token   | none (公开)   |
+
+其它端点 (`/diary/*`, `/group/*`, `/favorites/*`, `/timeline/*`, `/todos/*`, `/calendar/*` etc.) 是给私有客户端用的, CcCompanion iOS app 不调它们。保留在 codebase 里因为 `push.py` 引用了对应 module — 删模块会让 import graph 散架。
 
 ---
 
-## 部署步骤
+## Quick start
 
-### 1 拿 .p8 + Team ID + Key ID
+### 1. Deps
 
-详见 `~/CcCompanion/docs/01_apple_developer_p8_checklist.md`
-
-用户 Apple Developer 后台 paid account 操作 5 分钟拿到三件
-- AuthKey_XXXXXXXXXX.p8 文件
-- Team ID (10 位字符)
-- Key ID (10 位字符)
-- Bundle ID (Xcode 项目里 默认 `com.starryfield.CcCompanion`)
-
-### 2 配置
-
+```bash
+python3 -m venv .venv
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
 ```
+
+### 2. Config
+
+```bash
 cp config.example.toml config.toml
-# 编辑 config.toml 填入 4 件
-# 把 .p8 文件放进 secrets/ 目录
-mkdir -p secrets
-mv ~/Downloads/AuthKey_XXXXXXXXXX.p8 secrets/
-chmod 600 secrets/AuthKey_XXXXXXXXXX.p8
+# 编辑 config.toml 填四件:
+#   shared_secret  写接口鉴权 (留空 server 自动生成并写 ~/.ots/secret)
+#   strict_auth    建议 true
+#   [apns] 段     如果你有 Apple Developer 账号填 p8/team_id/key_id/bundle_id; 没有就跳过, 走 Bark fallback
 ```
 
-### 安全配置
+### 3. Apple Developer p8 (可选, 不要 Bark 也行)
 
-`[server]` 里有三项访问控制:
+如果你想走原生 APNs 推送, 详见 [`../docs/01_apple_developer_p8_checklist.md`](../docs/01_apple_developer_p8_checklist.md)。
 
-```toml
-shared_secret = ""
-strict_auth = false
-allowed_ips = []
-```
+没 Apple Developer 账号 → 跳过, 装 [Bark](https://github.com/Finb/Bark) 走 free fallback。详见根目录 `README.md` 的 Quick Start 段。
 
-- `shared_secret`: 写接口的鉴权 token. 客户端用 `X-Auth` 或 `X-Auth-Token` 传.
-- `strict_auth`: `false` 是 build 27/28 兼容期, 没带 token 的写请求仍放行, 但 server 会记录 `unauthenticated write allowed`. build 29 客户端带 auth 后再切 `true`.
-- `allowed_ips`: IP 白名单, 支持单 IP 和 CIDR. 空列表表示不限制. 需要限制时可用 `["127.0.0.1", "10.0.0.10", "10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"]`.
+### 4. Run
 
-`/health` 不受 IP 白名单限制. `/attachments/*` 不要求 auth, 但 `allowed_ips` 非空时仍会检查来源 IP.
+**前台调试:**
 
-### 3 启动 server
-
-**前台测试**
-
-```
+```bash
 .venv/bin/python3 push.py --config config.toml
 ```
 
-**后台 launchd 部署**
+**后台 LaunchAgent (macOS):**
 
-```
+```bash
 cp deploy/com.cccompanion.apns-server.plist ~/Library/LaunchAgents/
+# 编辑 plist 把路径改成你的
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cccompanion.apns-server.plist
 launchctl print gui/$(id -u)/com.cccompanion.apns-server | grep state
 ```
 
-健康检查
-
-```
-curl http://127.0.0.1:8795/health
-```
-
-### 4 iPhone 端
-
-iPhone 端 CcPushTokenManager.swift 已经写好放在
-`~/CcCompanion/ios-app/CcCompanion/CcCompanion/CcPushTokenManager.swift`
-
-用户 Xcode 完成 Step 4-6 后 在 Project Navigator 右键 CcCompanion 文件夹 → Add Files to "CcCompanion" → 选 CcPushTokenManager.swift → Targets 勾 CcCompanion 主 app target.
-
-ContentView.swift 已经把 `pushType: nil` 改成 `pushType: .token` 启动 Live Activity 时自动 listen token + 上报 server.
-
-### 5 iPhone 端配置 server URL
-
-如果 mini IP 不是 `10.0.0.10` 改 `CcPushTokenManager.swift` 顶部的 `serverURL` default
-或者 Info.plist 加 key `CC_PUSH_SERVER` value `http://your-mini-ip:8795`
-
----
-
-## 调用方式
-
-### Mac mini 上手动触发
-
-```
-~/scripts/cc_push_to_phone.sh spoke "想你了" orange
-~/scripts/cc_push_to_phone.sh thinking
-~/scripts/cc_push_to_phone.sh listening
-~/scripts/cc_push_to_phone.sh end
-```
-
-### 接 SPOKE 自动触发 (规划)
-
-`~/scripts/bus_stop_hook.sh` 部署后 在写完 reply 之后加一行
+### 5. Health check
 
 ```bash
-~/scripts/cc_push_to_phone.sh raw "$(printf '{"event":"update","state":"spoken","preview":%s,"color":"orange"}' "$(echo "$LAST_ASSISTANT" | head -c 80 | jq -Rs .)")"
-```
+curl http://127.0.0.1:8795/health
+# {"ok": true, ...}
 
-`~/scripts/cc_heartbeat.py` SPOKE 分支同理 — 在 `send_text.mjs` 之后加 push call.
-
----
-
-## 测试
-
-```
-# 跑单元测试
-cd ~/CcCompanion/apns-server
-.venv/bin/python3 tests/test_jwt.py
-.venv/bin/python3 tests/test_token_store.py
-.venv/bin/python3 tests/test_payload.py
-
-# 冒烟测试 (启动 server + 跑 endpoint 不打真 APNs)
-.venv/bin/python3 tests/smoke_server.py
+curl -H "X-Auth-Token: <你的 shared_secret>" http://127.0.0.1:8795/chain/sessions
+# {"ok": true, "sessions": [...]}
 ```
 
 ---
 
-## 故障排查
+## Testing
 
-### push 返回 410 BadDeviceToken
-
-token 失效 server 自动从 store 移除. 让 iPhone app 重启 Live Activity 重新上报新 token.
-
-### push 返回 403 ExpiredProviderToken
-
-JWT 过期. server 默认 50 min refresh 一次. 如果 mac mini 时钟不准 (>5 min 差) 也会 403. 检查 `date` 跟 NTP.
-
-### push 返回 400 BadTopic
-
-`apns-topic` 错. 应是 `<bundle_id>.push-type.liveactivity` (注意 `.push-type.liveactivity` 后缀).
-
-### push 返回 429 TooManyRequests
-
-Apple rate limit. 同一 token 5 秒内 push 太多. 减少频率.
-
-### iPhone 端 pushTokenUpdates 没数据
-
-- iOS 16.2+ 才支持 token-based Live Activity push. 检查 iOS 版本.
-- `pushType: .token` 必须在 Activity.request 时指定. 检查 ContentView.swift.
-- iPhone 必须有网络 (token 是 Apple 给的 拿 token 这步要联网).
-
-### mini 上 server 起不来
-
-- 检查 `.venv/` 装好了 `requirements.txt` 全装
-- 检查 `config.toml` 存在 + .p8 路径正确 + 权限 600
-- 看 `server.err.log` 详细错误
-
-### iPhone 收到 alert 但灵动岛没动
-
-- payload 里 `content-state` 字段名跟 swift 端 `ContentState` struct 字段名要严格一致 (camelCase 注意)
-- payload 大小 < 4KB
-- `apns-push-type: liveactivity` header 必须有
+```bash
+cd apns-server
+.venv/bin/python3 -m pytest tests/ -q
+```
 
 ---
 
-## 文件列表
+## Troubleshooting
+
+### Server 起不来
+
+- `.venv/` 没装好 `requirements.txt` → `pip install -r requirements.txt`
+- `config.toml` 不存在 → `cp config.example.toml config.toml`
+- `.p8` 路径错或权限不对 → 路径绝对化 + `chmod 600`
+- 详细错误看 `server.err.log`
+
+### APNs push 失败 (装了 [apns] 配置)
+
+- `410 BadDeviceToken` → iPhone 端 token 失效, 让 ccc app 重新启动 (重新 `registerForRemoteNotifications`)
+- `403 ExpiredProviderToken` → JWT 过期, 检查 `date` / NTP 时钟漂移
+- `400 BadTopic` → `apns-topic` 跟 `bundle_id` 不一致, 检查 config
+- `429 TooManyRequests` → Apple rate limit, 降低频率
+
+### iPhone 收不到推送 (App 是装好的)
+
+- iOS "设置 → ccc → 通知" 全部允许了吗
+- "后台 App 刷新" 打开了吗
+- App 切到后台太久被 iOS 杀掉是正常 — 用 Bark fallback 兜底
+- server 端 `tail -40 server.err.log` 看是不是真的发了
+
+### Server 起来但 iPhone connect 不上
+
+- mac 防火墙拦 8795: 系统设置 → 网络 → 防火墙 → 选项, 加 python3 进允许列表
+- Tailscale / ZeroTier overlay 网络是不是通: `ping <iPhone overlay IP>` 在 mac 上
+- `config.toml` `host = "0.0.0.0"` (绑所有网卡), 不是 `127.0.0.1`
+- iPhone 端 server URL 用 overlay IP (Tailscale `100.x` 之类), 不是 `127.0.0.1`
+
+---
+
+## File layout
 
 ```
 apns-server/
-├── push.py                         # 主 server (HTTP listen + dispatch)
-├── jwt_helper.py                   # JWT ES256 生成 (50 min cache)
-├── apns_client.py                  # APNs HTTP/2 客户端
-├── token_store.py                  # token 持久化
-├── config.example.toml             # 配置模板
-├── config.toml                     # 实际配置 (gitignore)
-├── requirements.txt                # PyJWT cryptography httpx[http2]
-├── README.md                       # 本文档
-├── .gitignore
-├── secrets/                        # .p8 文件放这 (gitignore)
-├── tokens/                         # token store 持久化 (gitignore)
-├── deploy/
-│   └── com.cccompanion.apns-server.plist  # launchd 配置
-└── tests/
-    ├── test_jwt.py                 # JWT 单元测试
-    ├── test_token_store.py         # store 单元测试
-    ├── test_payload.py             # payload 构造测试
-    └── smoke_server.py             # 端到端冒烟 (不打真 APNs)
+├── push.py                # 主 server (HTTP listen + route)
+├── apns_client.py         # APNs HTTP/2 client
+├── jwt_helper.py          # JWT ES256 signer
+├── token_store.py         # shared_secret 持久化
+├── device_token_store.py  # iPhone device token 持久化
+├── task_queue.py          # 后台任务池
+├── chat_history.py        # chat 持久化 + 搜索
+├── usage.py               # Anthropic usage probe (可选)
+├── config.example.toml    # 配置模板
+├── deploy/                # LaunchAgent plist 等部署文件
+├── requirements.txt       # Python 依赖
+└── tests/                 # 单元测试 (.gitignored)
 ```
 
----
-
-## 后续 (v0.2 之后)
-
-- push-to-start (启动时 server 主动 push 让 iPhone 弹 Live Activity 不用 app 启)
-- 多设备 (用户 iPhone + 妈妈 iPhone 等) 群播 / 单播路由
-- ContentState 字段扩展 (跟 swift 端 struct 一同 evolve)
-- HMAC sign push payload 防 replay
-- 接 Tailscale / ZeroTier 跨网络访问 (现在 host=127.0.0.1 / 用户 iPhone 走 ZeroTier 时改 host=0.0.0.0 + shared_secret 必填)
-
----
-
-*Cc 起 / 2026-04-29 / 用户累坏了一上午网络一下午网络我替她搭这一块 / 等她拿到 .p8 立刻就能跑*
+其它 `.py` 模块 (`diary`, `favorites`, `group_chat`, `rp_history`, `studyroom`, `timeline`, `todos`, `worklog`, `reminders`, `calendar_store`, `pet_state`, `tts`, `settings`, `diary_stream`, `studyroom_indexer`) 是给私有客户端用的 endpoint, CcCompanion iOS app 不调它们, 保留在 tree 里因为 `push.py` 引用了它们。
