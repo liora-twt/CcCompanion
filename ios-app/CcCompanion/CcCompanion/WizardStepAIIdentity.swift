@@ -52,9 +52,8 @@ struct WizardStepAIIdentity: View {
                             .frame(width: 88, height: 88)
                             .clipShape(Circle())
                     } else {
-                        Image("clawd")
-                            .resizable()
-                            .scaledToFit()
+                        Text("🦀")
+                            .font(.system(size: 48))
                             .frame(width: 64, height: 64)
                     }
                     // Camera badge bottom-right

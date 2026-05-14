@@ -85,9 +85,8 @@ struct OnboardingWizard: View {
     private var stepWelcome: some View {
         VStack(spacing: 0) {
             Spacer()
-            Image("clawd")
-                .resizable()
-                .scaledToFit()
+            Text("🦀")
+                .font(.system(size: 80))
                 .frame(width: 100, height: 100)
                 .padding(.bottom, 20)
             Text("欢迎来到 CcCompanion")

@@ -66,14 +66,8 @@ struct CcAvatarView: View {
                     .resizable()
                     .scaledToFill()
             } else if role == .ai {
-                if UIImage(named: "clawd") != nil {
-                    Image("clawd")
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Text(aiAvatarEmoji)
-                        .font(.ccSerifAdaptive(size: max(12, size * 0.55), weight: .bold))
-                }
+                Text(aiAvatarEmoji)
+                    .font(.ccSerifAdaptive(size: max(12, size * 0.55), weight: .bold))
             } else {
                 Image(systemName: "person.circle.fill")
                     .resizable()
