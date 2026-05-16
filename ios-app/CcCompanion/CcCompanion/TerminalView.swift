@@ -175,7 +175,7 @@ struct TerminalView: View {
                             .foregroundStyle(s == vm.session ? Color.white : Color.ccTextDim)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 3)
-                            .background(s == vm.session ? Color.ccAssistant : Color.clear)
+                            .background(s == vm.session ? Color.ccAccent : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                 }
@@ -235,7 +235,7 @@ struct TerminalView: View {
             HStack(spacing: 8) {
                 Text("$")
                     .font(.system(size: 14, design: .monospaced).weight(.bold))
-                    .foregroundStyle(Color.ccAssistant)
+                    .foregroundStyle(Color.ccAccent)
 
                 TextField("", text: $vm.draft, prompt: Text("命令").foregroundStyle(Color.ccTextDim), axis: .vertical)
                     .lineLimit(1...4)
@@ -261,7 +261,7 @@ struct TerminalView: View {
                 } label: {
                     Image(systemName: vm.sending ? "ellipsis.circle" : "return")
                         .font(.ccSerifAdaptive(size: 20, weight: .semibold))
-                        .foregroundStyle(vm.draft.isEmpty && !vm.sending ? Color.white.opacity(0.25) : Color.ccAssistant)
+                        .foregroundStyle(vm.draft.isEmpty && !vm.sending ? Color.white.opacity(0.25) : Color.ccAccent)
                 }
                 .disabled(vm.sending)
             }

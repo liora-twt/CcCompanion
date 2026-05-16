@@ -3239,7 +3239,7 @@ private struct ChatInputBar: View {
                     .font(.ccSerifAdaptive(size: 20, weight: .semibold))
                     .scaleEffect(x: (vm.sending || commitPending) ? 1 : -1, y: 1)
                     .rotationEffect(.degrees((vm.sending || commitPending) ? 0 : -15))
-                    .foregroundStyle(hasContent ? Color.ccAssistant : Color.ccTextDim)
+                    .foregroundStyle(Color.ccAccent.opacity(hasContent ? 1.0 : 0.35))
             }
             .disabled(vm.sending || commitPending)
         }
@@ -3879,7 +3879,7 @@ private struct ChatListView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(Color.ccCard)
-                        .foregroundStyle(Color.ccAssistant)
+                        .foregroundStyle(Color.ccAccent)
                         .clipShape(Capsule())
                         .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 1)
                     }
@@ -4032,7 +4032,7 @@ private struct SearchFilterBar: View {
                             .padding(.vertical, 6)
                             .background(
                                 Capsule()
-                                    .fill(selected == filter ? Color.ccAssistant : Color.ccCard)
+                                    .fill(selected == filter ? Color.ccAccent : Color.ccCard)
                             )
                     }
                     .buttonStyle(.plain)
@@ -4118,7 +4118,7 @@ private struct TimelineNodeRow<Content: View>: View {
     private var color: Color {
         switch kind {
         case .user: return Color.ccAccent
-        case .cc: return Color.ccAssistant
+        case .cc: return Color.ccAccent
         case .task: return Color.ccTextDim.opacity(0.55)
         case .separator: return Color.ccTextDim.opacity(0.4)
         case .other(let role): return Self.hashColor(role)
@@ -4299,7 +4299,7 @@ private struct ChatMessageListRow: View {
             if multiSelectMode {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.ccSerifAdaptive(size: 20, weight: .semibold))
-                    .foregroundStyle(selected ? Color.ccAssistant : Color.ccTextDim)
+                    .foregroundStyle(selected ? Color.ccAccent : Color.ccTextDim)
                     .frame(width: 28)
             }
             ChatBubble(
@@ -5409,12 +5409,12 @@ struct ChatBubble: View {
                 // 字母编号 ABCD
                 Text(String(UnicodeScalar(0x41 + min(index, 25))!))
                     .font(.ccSerifAdaptive(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.ccAssistant)
+                    .foregroundStyle(Color.ccAccent)
                     .frame(width: 18, height: 18)
-                    .background(Circle().fill(Color.ccAssistant.opacity(0.14)))
+                    .background(Circle().fill(Color.ccAccent.opacity(0.14)))
                 Text(opt.label)
                     .font(.system(.callout, design: .serif))  // New York 衬线 偏手帐
-                    .foregroundStyle(Color.ccAssistant)  // 橘红 不再黑
+                    .foregroundStyle(Color.ccAccent)  // 橘红 不再黑
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.right")
