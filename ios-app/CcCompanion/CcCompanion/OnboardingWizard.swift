@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct OnboardingWizard: View {
     @AppStorage("cc_onboarding_completed") private var onboardingCompleted: Bool = false
@@ -7,6 +10,7 @@ struct OnboardingWizard: View {
     @State private var step: Int = 0
     @State private var serverURLInput: String = ""
     @State private var sharedSecretInput: String = ""
+    @State private var tailscaleDetectMessage: String = ""
     @State private var connectionStatus: ConnectionStatus = .idle
     @State private var connectionError: String = ""
     // Phase A — identity setup drafts (only persisted when user taps "下一步" / "进入 chat", not on 跳过)
@@ -133,12 +137,12 @@ struct OnboardingWizard: View {
                 .font(.ccSerifAdaptive(size: 22, weight: .bold))
                 .foregroundStyle(Color.ccText)
                 .padding(.bottom, 6)
-            Text("Mac 上跑 push.py 的公网入口")
+            Text("Mac 上跑 push.py 的 Tailscale HTTPS 入口")
                 .font(.ccSerifAdaptive(size: 14))
                 .foregroundStyle(Color.ccTextDim)
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 24)
-            TextField("http://...", text: $serverURLInput)
+            TextField("https://<machine>.<tailnet>.ts.net", text: $serverURLInput)
                 .font(.ccSerifAdaptive(size: 15))
                 .keyboardType(.URL)
                 .autocorrectionDisabled()
@@ -150,7 +154,28 @@ struct OnboardingWizard: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(isValidURL(serverURLInput) ? Color.ccAccent.opacity(0.5) : Color.clear, lineWidth: 1)
                 )
-            Text("不知道怎么架？参考 framework 文档（TBD）了解 server 部署方式")
+            Button {
+                detectTailscaleEndpoint()
+            } label: {
+                Label("Detect Tailscale", systemImage: "network.badge.shield.half.filled")
+                    .font(.ccSerifAdaptive(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.ccAccent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.ccCard)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .padding(.top, 10)
+
+            if !tailscaleDetectMessage.isEmpty {
+                Text(tailscaleDetectMessage)
+                    .font(.ccSerifAdaptive(size: 12))
+                    .foregroundStyle(Color.ccTextDim)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+            }
+
+            Text("Mac 端运行 onboard.sh 后复制 /tmp/ccc-apns-https-endpoint 里的地址。如果连不上，检查 Tailscale HTTPS certificates: https://login.tailscale.com/admin/dns")
                 .font(.ccSerifAdaptive(size: 12))
                 .foregroundStyle(Color.ccTextDim)
                 .multilineTextAlignment(.center)
@@ -295,6 +320,21 @@ struct OnboardingWizard: View {
               host != "example.com",
               url.scheme == "http" || url.scheme == "https" else { return false }
         return true
+    }
+
+    private func detectTailscaleEndpoint() {
+        #if canImport(UIKit)
+        let pasted = UIPasteboard.general.string?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if isValidURL(pasted), pasted.hasPrefix("https://"), pasted.contains(".ts.net") {
+            serverURLInput = pasted
+            tailscaleDetectMessage = "已从剪贴板填入 Tailscale HTTPS 地址"
+        } else {
+            tailscaleDetectMessage = "先在 Mac 端复制 /tmp/ccc-apns-https-endpoint 里的 https 地址，再点 Detect Tailscale"
+        }
+        #else
+        tailscaleDetectMessage = "请手动粘贴 Mac 端 /tmp/ccc-apns-https-endpoint 里的 https 地址"
+        #endif
     }
 
     private func testConnection() async {
