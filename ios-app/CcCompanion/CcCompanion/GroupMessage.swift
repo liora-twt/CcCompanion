@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 nonisolated struct GroupMessage: Identifiable, Codable, Hashable, Sendable {
     let id: String
@@ -108,11 +109,37 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
     let tmux: String?
     let canReply: Bool?
     let optional: Bool?
+    let customAvatarURL: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, avatar, color, model, tmux, optional
         case displayName = "display_name"
         case canReply = "can_reply"
+        case customAvatarURL = "custom_avatar_url"
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        kind: String? = nil,
+        avatar: String? = nil,
+        color: String? = nil,
+        model: String? = nil,
+        tmux: String? = nil,
+        canReply: Bool? = nil,
+        optional: Bool? = nil,
+        customAvatarURL: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kind = kind
+        self.avatar = avatar
+        self.color = color
+        self.model = model
+        self.tmux = tmux
+        self.canReply = canReply
+        self.optional = optional
+        self.customAvatarURL = customAvatarURL
     }
 
     var title: String {
@@ -127,12 +154,39 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
         return String(title.prefix(1))
     }
 
+    func withCustomAvatarURL(_ path: String?) -> GroupMember {
+        GroupMember(
+            id: id,
+            displayName: displayName,
+            kind: kind,
+            avatar: avatar,
+            color: color,
+            model: model,
+            tmux: tmux,
+            canReply: canReply,
+            optional: optional,
+            customAvatarURL: path
+        )
+    }
+
+    var avatarColor: Color {
+        switch color {
+        case "orange": return Color(red: 0.92, green: 0.45, blue: 0.20)
+        case "blue": return Color(red: 0.25, green: 0.48, blue: 0.95)
+        case "green": return Color(red: 0.20, green: 0.62, blue: 0.38)
+        case "purple": return Color(red: 0.52, green: 0.38, blue: 0.86)
+        case "slate": return Color(red: 0.38, green: 0.44, blue: 0.52)
+        default: return Color(red: 0.92, green: 0.45, blue: 0.20)
+        }
+    }
+
     static let defaults: [GroupMember] = [
         GroupMember(id: "amian", displayName: "阿眠", kind: "human", avatar: "眠", color: "neutral", model: nil, tmux: nil, canReply: false, optional: nil),
         GroupMember(id: "opia", displayName: "Opia", kind: "agent", avatar: "O", color: "orange", model: "Claude Opus 4.7 1m", tmux: "opia", canReply: true, optional: nil),
         GroupMember(id: "sonnet", displayName: "小豹", kind: "agent", avatar: "S", color: "blue", model: "Claude Sonnet 4.6", tmux: "bao", canReply: true, optional: nil),
         GroupMember(id: "shu", displayName: "枢", kind: "agent", avatar: "枢", color: "green", model: "Codex GPT-5.5", tmux: "shu", canReply: true, optional: nil),
         GroupMember(id: "opus47_fresh", displayName: "Opus47-fresh", kind: "agent", avatar: "F", color: "purple", model: "Claude Opus 4.7 fresh", tmux: "opus47-fresh", canReply: true, optional: true),
+        GroupMember(id: "fresh", displayName: "fresh", kind: "agent", avatar: "F", color: "purple", model: "Claude Opus 4.7 fresh", tmux: "opus47-fresh", canReply: true, optional: true),
         GroupMember(id: "di", displayName: "砥", kind: "agent", avatar: "砥", color: "slate", model: "Claude Opus 4.7", tmux: "砥", canReply: true, optional: nil),
     ]
 
@@ -164,3 +218,88 @@ nonisolated struct GroupStatusSnapshot: Codable, Hashable, Sendable {
     let agents: [String: GroupAgentStatus]
 }
 
+extension Notification.Name {
+    static let ccGroupAppearanceDidChange = Notification.Name("CcGroupAppearanceDidChange")
+}
+
+enum GroupAvatarStore {
+    static let pathsKey = "group_member_avatar_paths"
+    static let revisionKey = "group_avatar_revision"
+
+    static func avatarPath(for memberId: String) -> String? {
+        avatarPaths()[memberId]
+    }
+
+    static func avatarPaths() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: pathsKey),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    static func setAvatarPath(_ path: String, for memberId: String) {
+        var paths = avatarPaths()
+        paths[memberId] = path
+        persist(paths)
+        bumpRevision()
+    }
+
+    static func removeAvatar(for memberId: String) {
+        if let path = avatarPath(for: memberId) {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        var paths = avatarPaths()
+        paths.removeValue(forKey: memberId)
+        persist(paths)
+        bumpRevision()
+    }
+
+    static func filename(for memberId: String) -> String {
+        let clean = memberId.map { ch -> Character in
+            ch.isLetter || ch.isNumber || ch == "_" || ch == "-" ? ch : "_"
+        }
+        return "groupAvatar_\(String(clean)).png"
+    }
+
+    private static func persist(_ paths: [String: String]) {
+        guard let data = try? JSONEncoder().encode(paths) else { return }
+        UserDefaults.standard.set(data, forKey: pathsKey)
+    }
+
+    private static func bumpRevision() {
+        let next = UserDefaults.standard.integer(forKey: revisionKey) + 1
+        UserDefaults.standard.set(next, forKey: revisionKey)
+        NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
+    }
+}
+
+struct GroupAvatarView: View {
+    let member: GroupMember
+    let size: CGFloat
+
+    @AppStorage(GroupAvatarStore.revisionKey) private var avatarRevision: Int = 0
+
+    private var avatarPath: String? {
+        member.customAvatarURL ?? GroupAvatarStore.avatarPath(for: member.id)
+    }
+
+    var body: some View {
+        ZStack {
+            if let avatarPath, !avatarPath.isEmpty,
+               let image = UIImage(contentsOfFile: avatarPath) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Circle().fill(member.avatarColor)
+                Text(member.avatarText)
+                    .font(.ccSerifAdaptive(size: max(11, size * 0.42), weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .id("\(member.id)-\(avatarRevision)-\(avatarPath ?? "")")
+    }
+}

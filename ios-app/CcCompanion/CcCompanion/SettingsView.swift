@@ -338,6 +338,7 @@ struct CcSettingsView: View {
     @AppStorage("notify_on_polling_assistant") private var notifyOnPollingAssistant: Bool = true
     @AppStorage("enable_decision_haptic") private var enableDecisionHaptic: Bool = true
     @AppStorage("feature_group_view") private var featureGroupView: Bool = false
+    @AppStorage("group_name") private var groupName: String = "工作群"
     @AppStorage("chat_font_size_level") private var chatFontLevel: String = "medium"
     // Phase D 2026-05-11 — "仿 cc 终端文字" default true (旧行为). 关掉显示 "[AI名字] 正在输入..."
     @AppStorage("typing_verbs_enabled") private var typingVerbsEnabled: Bool = true
@@ -364,6 +365,13 @@ struct CcSettingsView: View {
     @State private var avatarCropPresented: Bool = false
     @State private var avatarRefreshTick: Int = 0  // bump to force avatar Image re-read after save
 
+    // 工作群头像 PHPicker + crop state
+    @State private var groupAvatarMemberId: String? = nil
+    @State private var groupAvatarPickerPresented: Bool = false
+    @State private var groupAvatarPickedImage: UIImage? = nil
+    @State private var groupAvatarCropPresented: Bool = false
+    @State private var groupAvatarRefreshTick: Int = 0
+
     // Phase E (item 7) — chat background PHPicker state
     @State private var bgPickerPresented: Bool = false
     @State private var bgPickedImage: UIImage? = nil
@@ -372,6 +380,12 @@ struct CcSettingsView: View {
     private static let aiAvatarFilename = "cccAvatarAI.png"
     private static let userAvatarFilename = "cccAvatarUser.png"
     private static let chatBackgroundFilename = "cccChatBackground.png"
+
+    private var groupConfigMembers: [GroupMember] {
+        ["amian", "opia", "di", "shu", "sonnet", "opus47_fresh", "fresh"].compactMap { id in
+            GroupMember.defaultMap[id]?.withCustomAvatarURL(GroupAvatarStore.avatarPath(for: id))
+        }
+    }
 
     private var buildVersion: String {
         let info = Bundle.main.infoDictionary
@@ -452,9 +466,7 @@ struct CcSettingsView: View {
                     toggleRow("决策提示触感和声效", binding: $enableDecisionHaptic)
                 }
 
-                section("实验功能") {
-                    toggleRow("工作群视图", binding: $featureGroupView)
-                }
+                groupConfigSection
 
                 // Group 7.5 聊天字号
                 section("聊天字号") {
@@ -533,6 +545,9 @@ struct CcSettingsView: View {
         .refreshable { await vm.refreshAll() }
         .onChange(of: aiName) { _, _ in CcNameResolver.notifyChanged() }
         .onChange(of: userName) { _, _ in CcNameResolver.notifyChanged() }
+        .onChange(of: groupName) { _, _ in
+            NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
+        }
         // Phase multi-server fallback — endpoint editor sheet
         .sheet(item: $editingEndpoint) { edit in
             EndpointEditorSheet(initial: edit) { saved in
@@ -596,6 +611,108 @@ struct CcSettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $groupAvatarPickerPresented) {
+            AvatarPHPicker { img in
+                groupAvatarPickerPresented = false
+                if let img {
+                    groupAvatarPickedImage = img
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        groupAvatarCropPresented = true
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $groupAvatarCropPresented) {
+            if let img = groupAvatarPickedImage, let memberId = groupAvatarMemberId {
+                AvatarCropView(
+                    originalImage: img,
+                    onConfirm: { cropped in
+                        if let path = AvatarDiskStore.save(cropped, filename: GroupAvatarStore.filename(for: memberId)) {
+                            GroupAvatarStore.setAvatarPath(path, for: memberId)
+                            groupAvatarRefreshTick &+= 1
+                            actionToast = "工作群头像已存"
+                        } else {
+                            actionToast = "工作群头像保存失败"
+                        }
+                        groupAvatarCropPresented = false
+                        groupAvatarPickedImage = nil
+                    },
+                    onCancel: {
+                        groupAvatarCropPresented = false
+                        groupAvatarPickedImage = nil
+                    }
+                )
+            }
+        }
+    }
+
+    // MARK: - Workgroup local settings
+
+    @ViewBuilder
+    private var groupConfigSection: some View {
+        section("工作群") {
+            rowToggleableText(label: "群名称") {
+                TextField("工作群", text: $groupName)
+                    .textFieldStyle(.plain)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(Color.ccAccent)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            ForEach(groupConfigMembers) { member in
+                groupAvatarRow(member: member)
+            }
+
+            toggleRow("工作群视图", binding: $featureGroupView)
+        }
+        .id("group-config-\(groupAvatarRefreshTick)")
+    }
+
+    @ViewBuilder
+    private func groupAvatarRow(member: GroupMember) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                groupAvatarMemberId = member.id
+                groupAvatarPickerPresented = true
+            } label: {
+                HStack(spacing: 10) {
+                    GroupAvatarView(member: member, size: 36)
+                        .overlay(Circle().stroke(Color.ccAccent.opacity(0.25), lineWidth: 1))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(member.title)
+                            .font(.ccSerifAdaptive(size: 15))
+                            .foregroundStyle(Color.ccText)
+                        Text(member.id)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color.ccTextDim)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Text(GroupAvatarStore.avatarPath(for: member.id) == nil ? "选择" : "更换")
+                .font(.ccSerifAdaptive(size: 12))
+                .foregroundStyle(Color.ccAccent)
+
+            if GroupAvatarStore.avatarPath(for: member.id) != nil {
+                Button {
+                    GroupAvatarStore.removeAvatar(for: member.id)
+                    groupAvatarRefreshTick &+= 1
+                    actionToast = "\(member.title) 头像已恢复默认"
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.ccSerifAdaptive(size: 12, weight: .semibold))
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .overlay(Rectangle().fill(Color.ccTextDim.opacity(0.1)).frame(height: 0.5), alignment: .bottom)
     }
 
     // MARK: - Phase E avatar / background helpers

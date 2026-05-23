@@ -92,9 +92,10 @@ final class GroupStore: ObservableObject {
     }
 
     func member(for id: String) -> GroupMember {
-        if let member = membersById[id] { return member }
-        if let member = GroupMember.defaultMap[id] { return member }
-        return GroupMember(id: id, displayName: id, kind: nil, avatar: nil, color: "neutral", model: nil, tmux: nil, canReply: nil, optional: nil)
+        let member = membersById[id]
+            ?? GroupMember.defaultMap[id]
+            ?? GroupMember(id: id, displayName: id, kind: nil, avatar: nil, color: "neutral", model: nil, tmux: nil, canReply: nil, optional: nil)
+        return member.withCustomAvatarURL(GroupAvatarStore.avatarPath(for: id))
     }
 
     func start() {

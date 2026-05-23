@@ -9,10 +9,34 @@ import SwiftUI
 
 struct GroupChatView: View {
     @StateObject private var store = GroupStore()
+    @AppStorage("group_name") private var groupName: String = "工作群"
+    @State private var searchVisible = false
+    @State private var searchText = ""
+    @State private var showFavorites = false
+    @State private var favoriteMessageIds: Set<String> = GroupFavoritesStore.ids()
+
+    private var visibleMessages: [GroupMessage] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard searchVisible, !q.isEmpty else { return store.messages }
+        return store.messages.filter { message in
+            GroupMessageSearch.matches(message, member: store.member(for: message.senderId), query: q)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             GroupChatStatusStrip(store: store)
+            if searchVisible {
+                GroupSearchBar(
+                    text: $searchText,
+                    visibleCount: visibleMessages.count,
+                    totalCount: store.messages.count,
+                    onClose: {
+                        searchText = ""
+                        searchVisible = false
+                    }
+                )
+            }
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -24,9 +48,19 @@ struct GroupChatView: View {
                                 .padding(.top, 40)
                         } else if store.messages.isEmpty {
                             emptyState
+                        } else if visibleMessages.isEmpty {
+                            GroupSearchEmptyState(query: searchText)
                         } else {
-                            ForEach(store.messages) { message in
-                                GroupMessageRow(message: message, member: store.member(for: message.senderId))
+                            ForEach(visibleMessages) { message in
+                                let member = store.member(for: message.senderId)
+                                GroupMessageRow(
+                                    message: message,
+                                    member: member,
+                                    isFavorite: favoriteMessageIds.contains(message.id),
+                                    onToggleFavorite: {
+                                        toggleFavorite(message: message, member: member)
+                                    }
+                                )
                                     .id(message.id)
                             }
                         }
@@ -55,10 +89,27 @@ struct GroupChatView: View {
             }
         }
         .background(Color.ccBg)
-        .navigationTitle("工作群")
+        .navigationTitle(groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "工作群" : groupName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        searchVisible.toggle()
+                        if !searchVisible { searchText = "" }
+                    }
+                } label: {
+                    Image(systemName: searchVisible ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                }
+                .tint(Color.ccAccent)
+
+                Button {
+                    showFavorites = true
+                } label: {
+                    Image(systemName: "star")
+                }
+                .tint(Color.ccAccent)
+
                 Button {
                     Task { await store.refreshNow() }
                 } label: {
@@ -67,8 +118,17 @@ struct GroupChatView: View {
                 .tint(Color.ccAccent)
             }
         }
-        .onAppear { store.start() }
+        .sheet(isPresented: $showFavorites) {
+            NavigationStack { GroupFavoritesView() }
+        }
+        .onAppear {
+            favoriteMessageIds = GroupFavoritesStore.ids()
+            store.start()
+        }
         .onDisappear { store.stop() }
+        .onReceive(NotificationCenter.default.publisher(for: .ccGroupFavoritesDidChange)) { _ in
+            favoriteMessageIds = GroupFavoritesStore.ids()
+        }
         .refreshable { await store.refreshNow() }
     }
 
@@ -87,6 +147,12 @@ struct GroupChatView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 70)
+    }
+
+    private func toggleFavorite(message: GroupMessage, member: GroupMember) {
+        let isNowFavorite = GroupFavoritesStore.toggle(message: message, member: member)
+        favoriteMessageIds = GroupFavoritesStore.ids()
+        CcToastBus.shared.show(isNowFavorite ? "已收藏工作群消息" : "已取消收藏")
     }
 }
 
@@ -142,6 +208,8 @@ private struct GroupChatStatusStrip: View {
 private struct GroupMessageRow: View {
     let message: GroupMessage
     let member: GroupMember
+    let isFavorite: Bool
+    let onToggleFavorite: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -186,14 +254,15 @@ private struct GroupMessageRow: View {
 
             if !message.isHumanSender { Spacer(minLength: 46) }
         }
+        .contextMenu {
+            Button(action: onToggleFavorite) {
+                Label(isFavorite ? "取消收藏" : "收藏", systemImage: isFavorite ? "star.slash" : "star")
+            }
+        }
     }
 
     private var avatar: some View {
-        Text(member.avatarText)
-            .font(.ccSerifAdaptive(size: 13, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 32)
-            .background(Circle().fill(memberColor))
+        GroupAvatarView(member: member, size: 32)
     }
 
     @ViewBuilder
@@ -221,17 +290,6 @@ private struct GroupMessageRow: View {
         if message.isTask { return .blue }
         if message.isShip { return .green }
         return Color.ccAccent
-    }
-
-    private var memberColor: Color {
-        switch member.color {
-        case "orange": return Color(red: 0.92, green: 0.45, blue: 0.20)
-        case "blue": return Color(red: 0.25, green: 0.48, blue: 0.95)
-        case "green": return Color(red: 0.20, green: 0.62, blue: 0.38)
-        case "purple": return Color(red: 0.52, green: 0.38, blue: 0.86)
-        case "slate": return Color(red: 0.38, green: 0.44, blue: 0.52)
-        default: return Color.ccAccent
-        }
     }
 
     private func highlightedText(_ text: String) -> Text {
@@ -267,11 +325,7 @@ private struct GroupTypingIndicator: View {
     var body: some View {
         HStack(spacing: 8) {
             ForEach(members.prefix(3)) { member in
-                Text(member.avatarText)
-                    .font(.ccSerifAdaptive(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color.ccAccent.opacity(0.85)))
+                GroupAvatarView(member: member, size: 26)
             }
             Text("\(members.map(\.title).joined(separator: "、")) 正在输入")
                 .font(.ccSerifAdaptive(size: 13))
