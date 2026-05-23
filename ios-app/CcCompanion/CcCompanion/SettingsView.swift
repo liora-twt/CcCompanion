@@ -575,10 +575,10 @@ struct CcSettingsView: View {
                     originalImage: img,
                     onConfirm: { cropped in
                         let filename = (slot == .ai) ? Self.aiAvatarFilename : Self.userAvatarFilename
-                        if let path = AvatarDiskStore.save(cropped, filename: filename) {
+                        if let storedFilename = AvatarDiskStore.save(cropped, filename: filename) {
                             switch slot {
-                            case .ai: aiAvatarPath = path
-                            case .user: userAvatarPath = path
+                            case .ai: aiAvatarPath = storedFilename
+                            case .user: userAvatarPath = storedFilename
                             }
                             avatarRefreshTick &+= 1
                             actionToast = "头像已存"
@@ -601,8 +601,8 @@ struct CcSettingsView: View {
                 bgPickerPresented = false
                 if let img {
                     let resized = downscaleForBackground(img)
-                    if let path = AvatarDiskStore.save(resized, filename: Self.chatBackgroundFilename) {
-                        chatBackgroundPath = path
+                    if let storedFilename = AvatarDiskStore.save(resized, filename: Self.chatBackgroundFilename) {
+                        chatBackgroundPath = storedFilename
                         bgRefreshTick &+= 1
                         actionToast = "聊天背景已存"
                     } else {
@@ -627,8 +627,8 @@ struct CcSettingsView: View {
                 AvatarCropView(
                     originalImage: img,
                     onConfirm: { cropped in
-                        if let path = AvatarDiskStore.save(cropped, filename: GroupAvatarStore.filename(for: memberId)) {
-                            GroupAvatarStore.setAvatarPath(path, for: memberId)
+                        if let storedFilename = AvatarDiskStore.save(cropped, filename: GroupAvatarStore.filename(for: memberId)) {
+                            GroupAvatarStore.setAvatarPath(storedFilename, for: memberId)
                             groupAvatarRefreshTick &+= 1
                             actionToast = "工作群头像已存"
                         } else {
@@ -785,7 +785,7 @@ struct CcSettingsView: View {
             .overlay(Rectangle().fill(Color.ccTextDim.opacity(0.1)).frame(height: 0.5), alignment: .bottom)
             if !chatBackgroundPath.isEmpty {
                 Button {
-                    AvatarDiskStore.remove(filename: Self.chatBackgroundFilename)
+                    AvatarDiskStore.remove(storedValue: chatBackgroundPath)
                     chatBackgroundPath = ""
                     bgRefreshTick &+= 1
                     actionToast = "已恢复默认背景"
@@ -808,7 +808,7 @@ struct CcSettingsView: View {
 
     @ViewBuilder
     private var chatBackgroundThumbnail: some View {
-        if !chatBackgroundPath.isEmpty, let img = UIImage(contentsOfFile: chatBackgroundPath) {
+        if !chatBackgroundPath.isEmpty, let img = AvatarDiskStore.load(storedValue: chatBackgroundPath) {
             Image(uiImage: img).resizable().scaledToFill()
         } else {
             ZStack {

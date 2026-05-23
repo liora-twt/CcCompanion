@@ -61,7 +61,7 @@ struct CcAvatarView: View {
     var body: some View {
         ZStack {
             Circle().fill(Color.ccCard)
-            if !path.isEmpty, let uiImage = UIImage(contentsOfFile: path) {
+            if !path.isEmpty, let uiImage = AvatarDiskStore.load(storedValue: path) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
@@ -78,7 +78,7 @@ struct CcAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .id("\(role == .ai ? "ai" : "user")-\(path)")
+        .id("\(role == .ai ? "ai" : "user")-\(AvatarDiskStore.filename(fromStoredValue: path))")
     }
 }
 
@@ -301,7 +301,7 @@ enum AvatarDiskStore {
     }
 
     /// Save a UIImage as PNG to documents dir under `filename` (e.g. "cccAvatarAI.png").
-    /// Returns the absolute path on success.
+    /// Returns filename on success. Persisting only filename survives iOS container path changes.
     @discardableResult
     static func save(_ image: UIImage, filename: String) -> String? {
         let url = documentsURL(filename: filename)
@@ -310,10 +310,28 @@ enum AvatarDiskStore {
         do {
             try data.write(to: url, options: .atomic)
             CcNameResolver.notifyChanged()
-            return url.path
+            return filename
         } catch {
             return nil
         }
+    }
+
+    static func filename(fromStoredValue value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if let url = URL(string: trimmed), url.isFileURL {
+            return url.lastPathComponent
+        }
+        if trimmed.contains("/") {
+            return URL(fileURLWithPath: trimmed).lastPathComponent
+        }
+        return trimmed
+    }
+
+    static func load(storedValue: String) -> UIImage? {
+        let filename = filename(fromStoredValue: storedValue)
+        guard !filename.isEmpty else { return nil }
+        return load(filename: filename)
     }
 
     /// Load a UIImage from documents dir if file exists.
@@ -329,5 +347,26 @@ enum AvatarDiskStore {
     static func remove(filename: String) {
         let url = documentsURL(filename: filename)
         try? FileManager.default.removeItem(at: url)
+    }
+
+    static func remove(storedValue: String) {
+        let filename = filename(fromStoredValue: storedValue)
+        guard !filename.isEmpty else { return }
+        remove(filename: filename)
+    }
+
+    static func migrateStoredAvatarPathsIfNeeded() {
+        migrateFilenameDefault(forKey: "ai_avatar_path")
+        migrateFilenameDefault(forKey: "user_avatar_path")
+        migrateFilenameDefault(forKey: "chat_background_path")
+        GroupAvatarStore.migrateLegacyPathsIfNeeded()
+    }
+
+    private static func migrateFilenameDefault(forKey key: String) {
+        let defaults = UserDefaults.standard
+        guard let value = defaults.string(forKey: key), !value.isEmpty else { return }
+        let filename = filename(fromStoredValue: value)
+        guard !filename.isEmpty, filename != value else { return }
+        defaults.set(filename, forKey: key)
     }
 }

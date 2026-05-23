@@ -2810,13 +2810,13 @@ struct ChatView: View {
             }
         }
         // Phase E (item 7) + Phase F (item 2) — 聊天背景 优先 disk image, fallback theme bg.
-        // .id(chatBackgroundPath) 强制 path 变时整 ZStack 重建, 绕开 UIImage(contentsOfFile:) 可能的 cache.
+        // .id(chatBackgroundPath) 强制 filename 变时整 ZStack 重建, 避免背景图缓存旧状态.
         .background(
             ZStack {
                 Color.ccBg
                 #if canImport(UIKit)
                 if !chatBackgroundPath.isEmpty,
-                   let img = UIImage(contentsOfFile: chatBackgroundPath) {
+                   let img = AvatarDiskStore.load(storedValue: chatBackgroundPath) {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFill()
@@ -6751,7 +6751,7 @@ struct ImageGridSection: View {
             Circle()
                 .fill(Color.black.opacity(0.35))
                 .frame(width: size + 2, height: size + 2)
-            if !path.isEmpty, let ui = UIImage(contentsOfFile: path) {
+            if !path.isEmpty, let ui = AvatarDiskStore.load(storedValue: path) {
                 Image(uiImage: ui)
                     .resizable()
                     .scaledToFill()

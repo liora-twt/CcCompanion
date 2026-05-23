@@ -231,6 +231,10 @@ enum GroupAvatarStore {
     }
 
     static func avatarPaths() -> [String: String] {
+        rawAvatarPaths().mapValues { AvatarDiskStore.filename(fromStoredValue: $0) }
+    }
+
+    private static func rawAvatarPaths() -> [String: String] {
         guard let data = UserDefaults.standard.data(forKey: pathsKey),
               let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
             return [:]
@@ -240,14 +244,14 @@ enum GroupAvatarStore {
 
     static func setAvatarPath(_ path: String, for memberId: String) {
         var paths = avatarPaths()
-        paths[memberId] = path
+        paths[memberId] = AvatarDiskStore.filename(fromStoredValue: path)
         persist(paths)
         bumpRevision()
     }
 
     static func removeAvatar(for memberId: String) {
         if let path = avatarPath(for: memberId) {
-            try? FileManager.default.removeItem(atPath: path)
+            AvatarDiskStore.remove(storedValue: path)
         }
         var paths = avatarPaths()
         paths.removeValue(forKey: memberId)
@@ -272,6 +276,15 @@ enum GroupAvatarStore {
         UserDefaults.standard.set(next, forKey: revisionKey)
         NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
     }
+
+    static func migrateLegacyPathsIfNeeded() {
+        let current = rawAvatarPaths()
+        guard !current.isEmpty else { return }
+        let migrated = current.mapValues { AvatarDiskStore.filename(fromStoredValue: $0) }
+        guard migrated != current else { return }
+        persist(migrated)
+        bumpRevision()
+    }
 }
 
 struct GroupAvatarView: View {
@@ -287,7 +300,7 @@ struct GroupAvatarView: View {
     var body: some View {
         ZStack {
             if let avatarPath, !avatarPath.isEmpty,
-               let image = UIImage(contentsOfFile: avatarPath) {
+               let image = AvatarDiskStore.load(storedValue: avatarPath) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -300,6 +313,6 @@ struct GroupAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .id("\(member.id)-\(avatarRevision)-\(avatarPath ?? "")")
+        .id("\(member.id)-\(avatarRevision)-\(AvatarDiskStore.filename(fromStoredValue: avatarPath ?? ""))")
     }
 }

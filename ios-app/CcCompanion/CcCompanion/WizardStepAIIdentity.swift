@@ -147,8 +147,8 @@ struct WizardStepAIIdentity: View {
             CcNameResolver.notifyChanged()
         }
         if let img = savedImage,
-           let path = AvatarDiskStore.save(img, filename: Self.avatarFilename) {
-            UserDefaults.standard.set(path, forKey: "ai_avatar_path")
+           let filename = AvatarDiskStore.save(img, filename: Self.avatarFilename) {
+            UserDefaults.standard.set(filename, forKey: "ai_avatar_path")
             CcNameResolver.notifyChanged()
         }
     }

@@ -18,6 +18,7 @@ struct CcCompanionApp: App {
         CcServerConfig.migrateLegacySharedSecretIfNeeded()
         CcServerConfig.migrateLegacySingleURLIfNeeded()
         CcServerConfig.syncToAppGroup()
+        AvatarDiskStore.migrateStoredAvatarPathsIfNeeded()
         Self.registerCustomFonts()
         #if os(iOS) && !targetEnvironment(macCatalyst)
         Task { @MainActor in
