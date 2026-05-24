@@ -484,6 +484,12 @@ enum GroupMemberAdditionsStore {
         persist(list)
     }
 
+    /// Build 220 r4 item 2 — public bump so callsites can force a SwiftUI rebuild
+    /// when the @AppStorage observation lags after add/remove.
+    static func bumpRevisionPublic() {
+        bumpRevision()
+    }
+
     private static func persist(_ list: [GroupMember]) {
         guard let data = try? JSONEncoder().encode(list) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)

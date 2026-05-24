@@ -1086,7 +1086,7 @@ private struct GroupMessageRow: View {
             let token = String(text[tokenRange])
             if let resolved = mentionResolve(token: token) {
                 result = result + Text("@\(resolved.label)")
-                    .foregroundColor(resolved.color)
+                    .foregroundStyle(resolved.color)
                     .bold()
             } else {
                 result = result + Text(String(text[range]))
@@ -1455,8 +1455,8 @@ private struct AgentMentionPicker: View {
 // MARK: - Search Filter (build 215 P3)
 
 /// 群聊搜索 filter chip — 跟 ChatView SearchFilter 对齐 (全部 / 图片视频 / 文件 / 链接 / 音乐音频 / 日期).
-/// 当前 GroupMessage 没有 attachment 字段, 图片视频 / 文件 / 音乐音频 只能走文本 URL 后缀粗匹配 (大概率空 result).
-/// 链接走 http(s) URL 检测真能用. 日期 chip 暂只切 filter 不弹 date picker (后续 spec).
+/// Build 220 r4 item 4 — 之前注释说"无 attachment 字段, 粗匹配大概率空" — 现在 attachment_url / attachment_type
+/// 已有 (build 217-patch-A), filter 改走真字段, 文本 URL 后缀作为 fallback.
 enum GroupSearchFilter: String, CaseIterable, Identifiable {
     case all = "全部"
     case image = "图片视频"
@@ -1468,17 +1468,25 @@ enum GroupSearchFilter: String, CaseIterable, Identifiable {
 
     func matches(_ message: GroupMessage) -> Bool {
         let text = message.text.lowercased()
+        let url = (message.attachmentUrl ?? "").lowercased()
+        let kind = (message.attachmentType ?? "").lowercased()
         switch self {
         case .all:
             return true
         case .image:
-            // 文本中含图片扩展名 URL 粗匹配
+            // Build 220 r4 — 真 attachment 字段优先 (kind=image/video 或 URL 后缀), fallback 走文本
+            if kind == "image" || kind == "video" { return true }
+            if url.range(of: #"\.(png|jpg|jpeg|gif|webp|heic|mp4|mov|m4v)$"#, options: .regularExpression) != nil { return true }
             return text.range(of: #"https?://\S+\.(png|jpg|jpeg|gif|webp|heic|mp4|mov)\b"#, options: .regularExpression) != nil
         case .file:
+            if kind == "file" { return true }
+            if url.range(of: #"\.(pdf|zip|doc|docx|xls|xlsx|ppt|pptx|txt|md|json|csv)$"#, options: .regularExpression) != nil { return true }
             return text.range(of: #"https?://\S+\.(pdf|zip|doc|docx|xls|xlsx|ppt|pptx|txt|md|json|csv)\b"#, options: .regularExpression) != nil
         case .link:
             return text.range(of: #"https?://"#, options: .regularExpression) != nil
         case .audio:
+            if kind == "audio" { return true }
+            if url.range(of: #"\.(mp3|wav|m4a|aac|flac|ogg)$"#, options: .regularExpression) != nil { return true }
             return text.range(of: #"https?://\S+\.(mp3|wav|m4a|aac|flac|ogg)\b"#, options: .regularExpression) != nil
         case .date:
             // 日期 chip 当前作 placeholder — 不在前端做日期过滤, 全显示. 后续接 date picker spec

@@ -851,10 +851,16 @@ struct CcSettingsView: View {
         }
         .sheet(isPresented: $memberAddSheetPresented) {
             GroupMemberAddSheet { newMember in
+                // Build 220 r4 item 2 — 不填 avatar 时之前出现 silent fail: sheet 关 + 成员不出现.
+                // 修法 (belt + suspenders): add() 内部 persist 已 bump revision, 这里再显式 bump 一次
+                // 防止某些情况 @AppStorage observation 还没 fire 就 sheet dismiss. dismiss 也延后一拍.
                 GroupMemberAdditionsStore.add(newMember)
+                GroupMemberAdditionsStore.bumpRevisionPublic()
                 Task { await GroupMemberSyncClient.add(newMember) }
-                memberAddSheetPresented = false
                 actionToast = "已添加 \(newMember.displayName)"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    memberAddSheetPresented = false
+                }
             } onCancel: {
                 memberAddSheetPresented = false
             }
@@ -1789,7 +1795,7 @@ struct GroupMemberEditSheet: View {
                 Button("取消", role: .cancel) {}
                 Button("删除", role: .destructive) { onDelete() }
             } message: {
-                Text("从群里删除 \(member.title). 长按列表行也能撤回 (会出现在隐藏成员里).")
+                Text("从群里删除 \(member.title). 删了就不在群里了 重新加成员才能恢复.")
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
