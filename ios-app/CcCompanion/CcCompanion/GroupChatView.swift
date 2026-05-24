@@ -32,6 +32,7 @@ struct GroupChatView: View {
     @State private var showAgentPicker: Bool = false
     @State private var sending: Bool = false
     @State private var inputToast: String = ""
+    @State private var draftMentionIds: [String] = []
     // Build 217 Q1 — 引用 quoting state (跟 ChatView vm.quoting 同款), 发送时带 reply_to, 不立刻发让用户加文本
     @State private var quoting: GroupMessage? = nil
     // Build 217-patch-A T1 — upload picker state (PHPicker / Camera / DocumentPicker, 跟 ChatView 同模式)
@@ -172,7 +173,7 @@ struct GroupChatView: View {
                             }
                         }
 
-                        if !store.typingMembers.isEmpty {
+                        if !searchVisible && !store.typingMembers.isEmpty {
                             GroupTypingIndicator(members: store.typingMembers)
                                 .id("typing-indicator")
                         }
@@ -201,7 +202,7 @@ struct GroupChatView: View {
                     }
                 }
                 .onChange(of: store.typingMembers.map(\.id).joined(separator: ",")) { _, marker in
-                    guard !marker.isEmpty else { return }
+                    guard !searchVisible, !marker.isEmpty else { return }
                     withAnimation(.easeOut(duration: 0.22)) {
                         proxy.scrollTo("typing-indicator", anchor: .bottom)
                     }
@@ -233,7 +234,7 @@ struct GroupChatView: View {
                         .font(.ccSerifAdaptive(size: 12))
                         .foregroundStyle(Color.ccAccent)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("引用 \(store.member(for: q.senderId).displayName)")
+                        Text("引用 \(store.member(for: q.senderId).title)")
                             .font(.ccSerifAdaptive(size: 11, weight: .semibold))
                             .foregroundStyle(Color.ccAccent)
                         Text(q.text)
@@ -358,7 +359,7 @@ struct GroupChatView: View {
                 onPickAgent: { pendingAgentPicker = true },
                 onSend: {
                     let captionToSend = pendingCaption
-                    let mentionsToSend = pendingMentions
+                    let mentionsToSend = mergedMentions(text: captionToSend, explicit: pendingMentions)
                     let data = att.data
                     let filename = att.filename
                     pendingAttachment = nil
@@ -382,18 +383,20 @@ struct GroupChatView: View {
             )
             .sheet(isPresented: $pendingAgentPicker) {
                 AgentMentionPicker(
-                    members: store.agentMembers,
-                    onPick: { member in
-                        if !pendingMentions.contains(member.id) {
-                            pendingMentions.append(member.id)
-                        }
-                        pendingAgentPicker = false
-                    },
-                    onPickAll: {
-                        pendingMentions = ["__all__"]
-                        pendingAgentPicker = false
+                members: store.agentMembers,
+                onPick: { member in
+                    if !pendingMentions.contains(member.id) {
+                        pendingMentions.append(member.id)
                     }
-                )
+                    pendingCaption = appendMention(member: member, to: pendingCaption)
+                    pendingAgentPicker = false
+                },
+                onPickAll: {
+                    pendingMentions = ["__all__"]
+                    pendingCaption = appendAllMention(to: pendingCaption)
+                    pendingAgentPicker = false
+                }
+            )
             }
         }
         .sheet(isPresented: $showAgentPicker) {
@@ -401,17 +404,13 @@ struct GroupChatView: View {
                 members: store.agentMembers,
                 onPick: { member in
                     insertMention(member: member)
+                    addDraftMention(member.id)
                     showAgentPicker = false
                 },
                 onPickAll: {
                     // Build 217 T2 — 艾特所有人, draft 插 `@all `, backend 解 mentions=["all"] 走全 agent fan-out
-                    if draftText.isEmpty {
-                        draftText = "@all "
-                    } else if draftText.hasSuffix(" ") || draftText.hasSuffix("\n") {
-                        draftText += "@all "
-                    } else {
-                        draftText += " @all "
-                    }
+                    draftText = appendAllMention(to: draftText)
+                    draftMentionIds = ["__all__"]
                     showAgentPicker = false
                     inputFocused = true
                 }
@@ -420,6 +419,7 @@ struct GroupChatView: View {
         .onAppear {
             favoriteMessageIds = GroupFavoritesStore.ids()
             store.start()
+            Task { await store.ensureViewerOnline() }
             // Build 215 T1 — 用户进入群聊 tab 视为已读, 清未读 / mention 计数
             store.markAllRead()
         }
@@ -522,15 +522,31 @@ struct GroupChatView: View {
     }
 
     private func insertMention(member: GroupMember) {
-        let token = "@\(member.displayName) "
-        if draftText.isEmpty {
-            draftText = token
-        } else if draftText.hasSuffix(" ") || draftText.hasSuffix("\n") {
-            draftText += token
-        } else {
-            draftText += " " + token
-        }
+        draftText = appendMention(member: member, to: draftText)
         inputFocused = true
+    }
+
+    private func appendMention(member: GroupMember, to text: String) -> String {
+        appendMentionToken("@\(member.title)", to: text)
+    }
+
+    private func appendAllMention(to text: String) -> String {
+        appendMentionToken("@all", to: text)
+    }
+
+    private func appendMentionToken(_ token: String, to text: String) -> String {
+        if text.isEmpty {
+            return "\(token) "
+        } else if text.hasSuffix(" ") || text.hasSuffix("\n") {
+            return text + "\(token) "
+        } else {
+            return text + " \(token) "
+        }
+    }
+
+    private func addDraftMention(_ id: String) {
+        guard !draftMentionIds.contains(id) else { return }
+        draftMentionIds.append(id)
     }
 
     /// Build 217-patch-A T1 — 拿到 PHPicker/Camera/FileImporter 的 Data, 走 /group/upload.
@@ -538,7 +554,7 @@ struct GroupChatView: View {
     /// 上传完清 draft + quoting. inputToast 显示进度 / 失败.
     private func uploadAttachmentData(_ data: Data, filename: String) async {
         let caption = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let mentions = resolveMentions(in: caption)
+        let mentions = mergedMentions(text: caption, explicit: draftMentionIds)
         let replyTo = quoting?.id
         await MainActor.run {
             sending = true
@@ -555,6 +571,7 @@ struct GroupChatView: View {
             sending = false
             if ok {
                 draftText = ""
+                draftMentionIds = []
                 quoting = nil
                 inputToast = ""
             } else {
@@ -566,7 +583,7 @@ struct GroupChatView: View {
     private func commitSend() {
         let text = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
-        let mentions = resolveMentions(in: text)
+        let mentions = mergedMentions(text: text, explicit: draftMentionIds)
         let replyTo = quoting?.id
         sending = true
         inputToast = ""
@@ -576,6 +593,7 @@ struct GroupChatView: View {
                 sending = false
                 if ok {
                     draftText = ""
+                    draftMentionIds = []
                     quoting = nil
                 } else {
                     inputToast = store.lastError ?? "发送失败"
@@ -603,6 +621,17 @@ struct GroupChatView: View {
             if let hit = agents.first(where: { $0.displayName == token || $0.id == token || $0.title == token }) {
                 if !hits.contains(hit.id) { hits.append(hit.id) }
             }
+        }
+        return hits
+    }
+
+    private func mergedMentions(text: String, explicit: [String]) -> [String] {
+        var hits: [String] = []
+        for id in explicit where !hits.contains(id) {
+            hits.append(id)
+        }
+        for id in resolveMentions(in: text) where !hits.contains(id) {
+            hits.append(id)
         }
         return hits
     }
@@ -836,6 +865,9 @@ private struct GroupMessageRow: View {
                     // Build 217-patch-A T1 — attachment preview (image inline / file cell)
                     if let attachmentURL = message.attachmentFullURL() {
                         attachmentView(url: attachmentURL)
+                        if !message.mentions.isEmpty {
+                            mentionChipRow
+                        }
                     }
 
                     if !message.text.isEmpty {
@@ -970,6 +1002,23 @@ private struct GroupMessageRow: View {
                 #endif
             }
         }
+    }
+
+    @ViewBuilder
+    private var mentionChipRow: some View {
+        HStack(spacing: 6) {
+            ForEach(message.mentions, id: \.self) { token in
+                if let resolved = mentionResolve(token: token) {
+                    Text("@\(resolved.label)")
+                        .font(.ccSerifAdaptive(size: 11, weight: .bold))
+                        .foregroundStyle(resolved.color)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(resolved.color.opacity(0.12)))
+                }
+            }
+        }
+        .frame(maxWidth: 280, alignment: message.isHumanSender ? .trailing : .leading)
     }
 
     @ViewBuilder
@@ -1371,7 +1420,7 @@ private struct AgentMentionPicker: View {
                         HStack(spacing: 12) {
                             GroupAvatarView(member: member, size: 32)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(member.displayName)
+                                Text(member.title)
                                     .font(.ccSerifAdaptive(size: 15, weight: .semibold))
                                     .foregroundStyle(Color.ccText)
                                 if let model = member.model, !model.isEmpty {

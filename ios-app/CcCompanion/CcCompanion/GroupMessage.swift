@@ -195,8 +195,9 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
     }
 
     var avatarColor: Color {
-        // Build 220 item 8/9 — 走统一 designer 色板 (avatar / mention chip / nickname / sender label 同源)
-        GroupMember.uiColor(for: color)
+        // Build 220 r3 item 2: local color override wins, while the public
+        // roster default remains generic.
+        GroupMember.uiColor(for: GroupMemberColorOverrideStore.colorOverride(for: id) ?? color)
     }
 
     /// Build 220 item 8/9 — central palette resolver. 走 designer-grade muted 色 (避免荧光), 全 WCAG AA on cream/beige bg.
@@ -359,6 +360,7 @@ struct GroupAvatarView: View {
     let size: CGFloat
 
     @AppStorage(GroupAvatarStore.revisionKey) private var avatarRevision: Int = 0
+    @AppStorage(GroupMemberColorOverrideStore.revisionKey) private var colorRevision: Int = 0
 
     private var avatarPath: String? {
         member.customAvatarURL ?? GroupAvatarStore.avatarPath(for: member.id)
@@ -380,7 +382,7 @@ struct GroupAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .id("\(member.id)-\(avatarRevision)-\(AvatarDiskStore.filename(fromStoredValue: avatarPath ?? ""))")
+        .id("\(member.id)-\(avatarRevision)-\(colorRevision)-\(AvatarDiskStore.filename(fromStoredValue: avatarPath ?? ""))")
     }
 }
 
@@ -407,6 +409,42 @@ enum GroupMemberOverrideStore {
         var map = overrides()
         if let name, !name.isEmpty {
             map[memberId] = name
+        } else {
+            map.removeValue(forKey: memberId)
+        }
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+        bumpRevision()
+    }
+
+    private static func bumpRevision() {
+        let next = UserDefaults.standard.integer(forKey: revisionKey) + 1
+        UserDefaults.standard.set(next, forKey: revisionKey)
+        NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
+    }
+}
+
+/// 用户在 Settings 编辑过的 member color 覆盖. JSON map<id, color-tag> 落 UserDefaults.
+enum GroupMemberColorOverrideStore {
+    static let storageKey = "group_member_color_overrides"
+    static let revisionKey = "group_member_color_overrides_revision"
+
+    static func overrides() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    static func colorOverride(for memberId: String) -> String? {
+        overrides()[memberId]
+    }
+
+    static func setColorOverride(_ color: String?, for memberId: String) {
+        var map = overrides()
+        if let color, !color.isEmpty {
+            map[memberId] = color
         } else {
             map.removeValue(forKey: memberId)
         }

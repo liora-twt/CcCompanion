@@ -137,6 +137,20 @@ actor GroupNetworkClient {
         return try JSONDecoder().decode(GroupRosterOnlineResponse.self, from: data)
     }
 
+    func touchActiveViewer() async throws {
+        let url = CcServerConfig.serverURL.appendingPathComponent("group/poll")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "viewer", value: "amian"),
+        ]
+        guard let finalURL = components?.url else { throw URLError(.badURL) }
+        var request = CcServerConfig.authenticatedRequest(url: finalURL)
+        request.timeoutInterval = 10
+        let (_, response) = try await session.data(for: request)
+        try Self.validate(response: response)
+    }
+
     func fetchPoll(since: String?, limit: Int) async throws -> GroupPollResponse {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/poll")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -222,10 +236,10 @@ final class GroupStore: ObservableObject {
                 await self?.pollNext()
             }
         }
-        // Build 220 item 13 — 在线人数 5s 轮询
+        // Build 220 item 13: online count refreshes every 5 seconds.
         onlinePollTask?.cancel()
         onlinePollTask = Task { [weak self] in
-            await self?.refreshOnlineCount()
+            await self?.ensureViewerOnline()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 await self?.refreshOnlineCount()
@@ -249,6 +263,15 @@ final class GroupStore: ObservableObject {
         } catch {
             // silent — header dot 不显示 ok
         }
+    }
+
+    func ensureViewerOnline() async {
+        do {
+            try await client.touchActiveViewer()
+        } catch {
+            // header online count still refreshes below
+        }
+        await refreshOnlineCount()
     }
 
     func reload() async {

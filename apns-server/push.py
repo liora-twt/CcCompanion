@@ -2198,9 +2198,8 @@ class PushHandler(BaseHTTPRequestHandler):
         except Exception:
             limit = 100
         limit = min(max(limit, 1), 500)
-        # Build 220 item 13 — 如果 query 带 sender_id, 把它当 heartbeat 记入 last_seen
-        # 让 iOS poll loop 顺带表明 "amian 还在线". 没传不动 (e.g. 后台轮询)
-        viewer = self._query_value(qs, "sender_id")
+        # Build 220 item 13: optional viewer heartbeat for online roster.
+        viewer = self._query_value(qs, "viewer") or self._query_value(qs, "sender_id")
         if viewer:
             self.state.group_chat.touch_active(viewer)
         records = self.state.group_chat.read_since(since_ts=since, limit=limit)
