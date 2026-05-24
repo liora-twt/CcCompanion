@@ -143,9 +143,8 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
     }
 
     var title: String {
-        if id == "sonnet", displayName.lowercased() == "sonnet" {
-            return "小豹"
-        }
+        // Sanitized: was a project-specific nickname mapping. Fork users may add
+        // their own display-name overrides via agents_config.json (server side).
         return displayName
     }
 
@@ -180,14 +179,18 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    // Default roster. IDs are protocol identifiers kept for back-compat with the
+    // shipped Python server; display names / avatars / tmux session names are
+    // generic placeholders. Server-side override via `agents_config.json` will
+    // populate the real roster from `/group/roster` on first poll — these
+    // defaults only ever show during the initial fetch race.
     static let defaults: [GroupMember] = [
-        GroupMember(id: "amian", displayName: "阿眠", kind: "human", avatar: "眠", color: "neutral", model: nil, tmux: nil, canReply: false, optional: nil),
-        GroupMember(id: "opia", displayName: "Opia", kind: "agent", avatar: "O", color: "orange", model: "Claude Opus 4.7 1m", tmux: "opia", canReply: true, optional: nil),
-        GroupMember(id: "sonnet", displayName: "小豹", kind: "agent", avatar: "S", color: "blue", model: "Claude Sonnet 4.6", tmux: "bao", canReply: true, optional: nil),
-        GroupMember(id: "shu", displayName: "枢", kind: "agent", avatar: "枢", color: "green", model: "Codex GPT-5.5", tmux: "shu", canReply: true, optional: nil),
-        GroupMember(id: "opus47_fresh", displayName: "Opus47-fresh", kind: "agent", avatar: "F", color: "purple", model: "Claude Opus 4.7 fresh", tmux: "opus47-fresh", canReply: true, optional: true),
-        GroupMember(id: "fresh", displayName: "fresh", kind: "agent", avatar: "F", color: "purple", model: "Claude Opus 4.7 fresh", tmux: "opus47-fresh", canReply: true, optional: true),
-        GroupMember(id: "di", displayName: "砥", kind: "agent", avatar: "砥", color: "slate", model: "Claude Opus 4.7", tmux: "砥", canReply: true, optional: nil),
+        GroupMember(id: "amian", displayName: "User", kind: "human", avatar: "U", color: "neutral", model: nil, tmux: nil, canReply: false, optional: nil),
+        GroupMember(id: "opia", displayName: "Assistant", kind: "agent", avatar: "A", color: "orange", model: "Claude Opus 4.7", tmux: "assistant", canReply: true, optional: nil),
+        GroupMember(id: "sonnet", displayName: "Agent B", kind: "agent", avatar: "B", color: "blue", model: "Claude Sonnet 4.6", tmux: "agent-b", canReply: true, optional: nil),
+        GroupMember(id: "shu", displayName: "Agent C", kind: "agent", avatar: "C", color: "green", model: "Codex GPT-5.5", tmux: "agent-c", canReply: true, optional: nil),
+        GroupMember(id: "opus47_fresh", displayName: "Agent D", kind: "agent", avatar: "D", color: "purple", model: "Claude Opus 4.7", tmux: "agent-d", canReply: true, optional: true),
+        GroupMember(id: "di", displayName: "Agent E", kind: "agent", avatar: "E", color: "slate", model: "Claude Opus 4.7", tmux: "agent-e", canReply: true, optional: nil),
     ]
 
     static var defaultMap: [String: GroupMember] {

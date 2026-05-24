@@ -3424,7 +3424,7 @@ class PushHandler(BaseHTTPRequestHandler):
 
         # 通用 chat/append dedupe (非 move) 防 ios_reply 等客户端 retry 重复入库
         # 2026-05-07 修 用户 catch "为什么发两遍". role=move 走下面坐标幂等不动.
-        # 5-7 升级 5s→60s + cmid fallback 加 attachment + 命中返回原 rec (枢 review 推荐)
+        # 5-7 升级 5s→60s + cmid fallback 加 attachment + 命中返回原 rec (per code review)
         _req_t0 = time.time()
         client_msg_id = body.get("client_msg_id") or None
         dedupe_cache_key = None
@@ -3545,7 +3545,7 @@ class PushHandler(BaseHTTPRequestHandler):
             if isinstance(entry, tuple):
                 cache[dedupe_cache_key] = (entry[0], rec)
 
-        # 5-7 主修 (枢 review): Live Activity push 跟 standard notification 都搬到异步
+        # 5-7 主修 (per code review): Live Activity push 跟 standard notification 都搬到异步
         # 防 ACK 5-16s 阻塞 ios_reply 客户端 5s timeout
         # 这之前所有事必须做完 否则 ACK 后再读会拿不到 rec/text 之类局部
         active_tokens_snapshot = self.state.tokens.all_active() if role == "assistant" else []

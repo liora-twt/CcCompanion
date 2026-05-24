@@ -3,7 +3,7 @@
 //  CcCompanion
 //
 //  主 app 控制台 — 启动 Live Activity + 本地 update + 结束.
-//  v0.1 没接 APNs 全部本地 (路径 A by 枢 review).
+//  v0.1 没接 APNs 全部本地 (path A per code review).
 //
 
 import SwiftUI

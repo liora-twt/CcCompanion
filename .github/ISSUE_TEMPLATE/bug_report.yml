@@ -15,7 +15,7 @@ body:
       label: 发生了什么 / What happened
       description: 一句话讲清你做什么 → 你期望什么 → 实际发生什么。
       placeholder: |
-        例如: 我点 /switch bao 之后再发消息, 期望发到 bao session, 但消息还是发到 opia。
+        例如: 我点 /switch agent-b 之后再发消息, 期望发到 agent-b session, 但消息还是发到主 session。
     validations:
       required: true
 
@@ -27,9 +27,9 @@ body:
       placeholder: |
         1. 打开 ccc
         2. 在 chat tab 发 /list, 看到 sessions
-        3. 发 /switch bao
+        3. 发 /switch agent-b
         4. 发"hi"
-        5. 实际收到 opia 的回复, 不是 bao 的
+        5. 实际收到主 session 的回复, 不是 agent-b 的
     validations:
       required: true
 
@@ -83,7 +83,7 @@ body:
         或者 Xcode console 报错截图。
       render: shell
       placeholder: |
-        2026-05-14 08:30:12 [chat-append] sid=opia msg=xxx
+        2026-05-14 08:30:12 [chat-append] sid=assistant msg=xxx
         ...
 
   - type: textarea

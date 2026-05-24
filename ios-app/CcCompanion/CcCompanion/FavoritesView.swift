@@ -427,7 +427,7 @@ struct FavoriteDetailView: View {
 
 private func resolvedFavoriteRole(_ raw: String?) -> String {
     let value = (raw ?? "ref").lowercased()
-    if value == "user" || value == "mian" || value == "用户" || value == "bonnie" {
+    if value == "user" || value == "用户" {
         return CcNameResolver.name(for: .user)
     }
     if value == "assistant" || value == "cc" || value == "claude" {

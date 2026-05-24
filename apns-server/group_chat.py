@@ -11,12 +11,18 @@ import uuid
 from typing import Any, Callable
 
 
+# Default agent roster. The IDs (amian / opia / shu / sonnet / opus47_fresh)
+# are protocol identifiers kept for back-compat with shipped clients. Display
+# names, avatars and tmux session names below are generic placeholders. Fork
+# users: copy `agents_config.example.json` → `agents_config.json` (gitignored)
+# and supply your own roster + mention_aliases. ID-string customization
+# (renaming protocol ids) is a future spec.
 ROSTER: list[dict[str, Any]] = [
     {
         "id": "amian",
-        "display_name": "用户",
+        "display_name": "User",
         "kind": "human",
-        "avatar": "眠",
+        "avatar": "U",
         "color": "neutral",
         "model": None,
         "tmux": None,
@@ -24,47 +30,66 @@ ROSTER: list[dict[str, Any]] = [
     },
     {
         "id": "opia",
-        "display_name": "Cc",
+        "display_name": "Assistant",
         "kind": "agent",
-        "avatar": "O",
+        "avatar": "A",
         "color": "orange",
-        "model": "Claude Opus 4.7 1m",
-        "tmux": "opia",
+        "model": "Claude Opus 4.7",
+        "tmux": "assistant",
         "can_reply": True,
         "default_responder": True,
     },
     {
         "id": "sonnet",
-        "display_name": "sonnet",
+        "display_name": "Agent B",
         "kind": "agent",
-        "avatar": "S",
+        "avatar": "B",
         "color": "blue",
         "model": "Claude Sonnet 4.6",
-        "tmux": "bao",
+        "tmux": "agent-b",
         "can_reply": True,
     },
     {
         "id": "shu",
-        "display_name": "枢",
+        "display_name": "Agent C",
         "kind": "agent",
-        "avatar": "枢",
+        "avatar": "C",
         "color": "green",
         "model": "Codex GPT-5.5",
-        "tmux": "shu",
+        "tmux": "agent-c",
         "can_reply": True,
     },
     {
         "id": "opus47_fresh",
-        "display_name": "Opus47-fresh",
+        "display_name": "Agent D",
         "kind": "agent",
-        "avatar": "F",
+        "avatar": "D",
         "color": "purple",
-        "model": "Claude Opus 4.7 fresh",
-        "tmux": "opus47-fresh",
+        "model": "Claude Opus 4.7",
+        "tmux": "agent-d",
         "can_reply": True,
         "optional": True,
     },
 ]
+
+
+# Load optional user-supplied roster + alias config from `agents_config.json`
+# (gitignored). Falls back to defaults above if the file does not exist.
+def _load_agents_config() -> None:
+    global ROSTER, ROSTER_BY_ID, REPLY_AGENT_IDS, MENTION_ALIASES
+    cfg_path = Path(__file__).resolve().parent / "agents_config.json"
+    if not cfg_path.exists():
+        return
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        if isinstance(data.get("agents"), list) and data["agents"]:
+            ROSTER = data["agents"]
+            ROSTER_BY_ID = {m["id"]: m for m in ROSTER}
+            REPLY_AGENT_IDS = [m["id"] for m in ROSTER if m.get("can_reply")]
+        if isinstance(data.get("mention_aliases"), dict):
+            MENTION_ALIASES = dict(data["mention_aliases"])
+    except Exception:
+        pass
 
 
 ROSTER_BY_ID = {m["id"]: m for m in ROSTER}
@@ -81,29 +106,26 @@ MENTION_RE = re.compile(r"@([A-Za-z0-9_\-]+|[\u4e00-\u9fff]+)")
 MENTION_ALIASES = {
     "all": ALL_TOKEN,
     "__all__": ALL_TOKEN,
-    "全员": ALL_TOKEN,
-    "大家": ALL_TOKEN,
-    "opia": "opia",
-    "op": "opia",
+    "assistant": "opia",
+    "ai": "opia",
     "AI": "opia",
-    "amian": "amian",
-    "用户": "amian",
-    "宝宝": "amian",
-    "老婆": "amian",
+    "user": "amian",
     "User": "amian",
-    "bonnie": "amian",
+    "amian": "amian",
+    "opia": "opia",
+    "agent-b": "sonnet",
+    "b": "sonnet",
     "sonnet": "sonnet",
-    "小豹": "sonnet",
-    "bao": "sonnet",
-    "枢": "shu",
+    "agent-c": "shu",
+    "c": "shu",
     "shu": "shu",
-    "codex": "shu",
-    "fresh": "opus47_fresh",
-    "opus": "opus47_fresh",
-    "opus47": "opus47_fresh",
-    "opus47-fresh": "opus47_fresh",
+    "agent-d": "opus47_fresh",
+    "d": "opus47_fresh",
     "opus47_fresh": "opus47_fresh",
 }
+
+# Apply user config override if present (must run after MENTION_ALIASES init).
+_load_agents_config()
 
 
 def _now_iso() -> str:
@@ -203,7 +225,7 @@ class GroupChatStore:
         hop_count: int = 0,
     ) -> list[str]:
         # 2026-05-05 用户 push 加 agent 互相 @ 功能 + hop_count loop guard
-        # amian 发: 没 mention default opia 加 mentions 解析
+        # human user sends: no @mention → default to primary assistant; otherwise parse @
         # agent 发: 必须 explicit mention 才 fan-out + hop_count >= 3 停 (防无限 loop)
         if sender_id == "amian":
             if not mentions:
@@ -461,7 +483,7 @@ class GroupChatStore:
     def context_lines(self, limit: int = 20) -> list[str]:
         # 2026-05-09 用户 catch fan-out 上下文里 codex tool trace (Explored / Ran / Edited / Searched / Read 等)
         # 历史 jsonl 已经存着旧污染 这一层二级 filter 拦不让进 fan-out context
-        # 只针对 agent (shu / sonnet / opus47_fresh) sender amian 跟 opia 不会发 tool trace 不动
+        # only agent senders (non-human, non-primary) emit tool traces; skip otherwise
         TOOL_TRACE_PREFIXES = (
             "Explored",
             "Ran ", "Ran\n",

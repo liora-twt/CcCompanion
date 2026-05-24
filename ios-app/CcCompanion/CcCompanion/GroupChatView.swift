@@ -560,7 +560,7 @@ private struct GroupTypingIndicator: View {
             ForEach(members.prefix(3)) { member in
                 GroupAvatarView(member: member, size: 26)
             }
-            // Build 215 T2 — typing indicator 只 title 不带 model (阿眠拍 model 噪声大)
+            // Build 215 T2 — typing indicator 只 title 不带 model (per feedback: model 噪声大)
             Text("\(members.map(\.title).joined(separator: "、")) 正在输入")
                 .font(.ccSerifAdaptive(size: 13))
                 .foregroundStyle(Color.ccTextDim)
@@ -605,7 +605,7 @@ private struct GroupInputBar: View {
     }
 
     // Build 215 T7 — 顺序对齐 ChatInputBar: 加号 → 图片 → @ → TextField+mic → 发送
-    // 之前是 加号 → @ → TextField → 图片 → 发送 把图片挤到右边 阿眠 catch 距离不均.
+    // 之前是 加号 → @ → TextField → 图片 → 发送 把图片挤到右边 距离不均.
     var body: some View {
         HStack(spacing: 8) {
             Menu {

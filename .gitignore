@@ -73,3 +73,7 @@ apns-server/tests/
 
 # --- Doc archive (历史 spec / results / migration drafts) ---
 _archived/
+
+# Workgroup user-supplied agent config (sanitization 2026-05-24)
+apns-server/agents_config.json
+

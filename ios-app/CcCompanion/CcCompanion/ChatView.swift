@@ -749,7 +749,7 @@ final class ChatViewModel: ObservableObject {
 
         func flushTaskBuffer() {
             guard !taskBuffer.isEmpty else { return }
-            let agent = taskBuffer.first?.source ?? "枢"
+            let agent = taskBuffer.first?.source ?? "agent"
             let stack = ToolStack(
                 id: taskBuffer.first!.id,
                 agent: agent,
@@ -4846,7 +4846,7 @@ func iconForTaskText(_ text: String) -> String {
         ("error", "exclamationmark.triangle.fill"), ("fail", "exclamationmark.triangle.fill"), ("错", "exclamationmark.triangle.fill"),
         ("done", "checkmark.circle.fill"), ("完成", "checkmark.circle.fill"), ("成功", "checkmark.circle.fill"), ("ok", "checkmark.circle.fill"),
         ("派", "person.fill.badge.plus"), ("dispatch", "person.fill.badge.plus"),
-        ("枢", "person.crop.circle.fill"), ("sonnet", "person.crop.circle.fill"),
+        ("agent-c", "person.crop.circle.fill"), ("sonnet", "person.crop.circle.fill"),
         ("delete", "trash.fill"), ("删", "trash.fill"),
         ("create", "plus.circle.fill"), ("新建", "plus.circle.fill"), ("加", "plus.circle.fill"),
         ("update", "arrow.up.circle.fill"), ("升级", "arrow.up.circle.fill"),

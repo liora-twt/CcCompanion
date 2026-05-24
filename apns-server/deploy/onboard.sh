@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cc APNs server onboarding
-# 阿眠拿到 .p8 + 4 件后 一条命令完成 Step 2
+# Run after you have your .p8 + the 4 required values — one command for Step 2
 #
 # 用法:
 #   ./onboard.sh --p8 ~/Downloads/AuthKey_ABC1234567.p8 \

@@ -1,0 +1,54 @@
+{
+  "_comment": "Copy this to agents_config.json (gitignored) and customize for your own deployment. group_chat.py will load this on import; if missing, the generic in-code defaults are used.",
+  "agents": [
+    {
+      "id": "amian",
+      "display_name": "User",
+      "kind": "human",
+      "avatar": "U",
+      "color": "neutral",
+      "model": null,
+      "tmux": null,
+      "can_reply": false
+    },
+    {
+      "id": "opia",
+      "display_name": "Assistant",
+      "kind": "agent",
+      "avatar": "A",
+      "color": "orange",
+      "model": "Claude Opus 4.7",
+      "tmux": "assistant",
+      "can_reply": true,
+      "default_responder": true
+    },
+    {
+      "id": "sonnet",
+      "display_name": "Agent B",
+      "kind": "agent",
+      "avatar": "B",
+      "color": "blue",
+      "model": "Claude Sonnet 4.6",
+      "tmux": "agent-b",
+      "can_reply": true
+    },
+    {
+      "id": "shu",
+      "display_name": "Agent C",
+      "kind": "agent",
+      "avatar": "C",
+      "color": "green",
+      "model": "Codex GPT-5.5",
+      "tmux": "agent-c",
+      "can_reply": true
+    }
+  ],
+  "mention_aliases": {
+    "all": "__all__",
+    "user": "amian",
+    "assistant": "opia",
+    "ai": "opia",
+    "agent-b": "sonnet",
+    "agent-c": "shu"
+  }
+}

@@ -265,7 +265,9 @@ final class GroupStore: ObservableObject {
     }
 
     private func isMentioningHuman(_ message: GroupMessage) -> Bool {
-        let humanTags = ["amian", "阿眠", "User"]
+        // Human-tagging tokens. "amian" kept as the protocol-level id (see
+        // GroupMember.defaults note); "user" / "User" are the user-facing names.
+        let humanTags = ["amian", "user", "User"]
         if message.mentions.contains(where: { humanTags.contains($0) }) { return true }
         let text = message.text
         return humanTags.contains { text.contains("@\($0)") }
