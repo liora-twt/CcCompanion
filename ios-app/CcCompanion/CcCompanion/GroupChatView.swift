@@ -871,9 +871,7 @@ private struct GroupMessageRow: View {
                     }
 
                     if !message.text.isEmpty {
-                            highlightedText(message.text)
-                            .font(.ccSerifAdaptive(size: bodySize))
-                            .foregroundStyle(Color.ccText)
+                            Text(highlightedText(message.text))
                             .lineSpacing(3)
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1065,38 +1063,35 @@ private struct GroupMessageRow: View {
         return Color.ccAccent
     }
 
-    private func highlightedText(_ text: String) -> Text {
-        // Build 220 item 8a / 10: resolve @<token> through the active roster.
-        // Deleted members stay plain text instead of coming back as chips.
+    private func highlightedText(_ text: String) -> AttributedString {
+        var attr: AttributedString
+        do {
+            attr = try AttributedString(
+                markdown: text,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            )
+        } catch {
+            attr = AttributedString(text)
+        }
+        attr.foregroundColor = Color.ccText
+        attr.font = .ccSerifAdaptive(size: bodySize)
         let pattern = #"@([A-Za-z0-9_\-]+|[\u{4E00}-\u{9FFF}]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return Text(text)
+            return attr
         }
-        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        guard !matches.isEmpty else { return Text(text) }
-
-        var result = Text("")
-        var cursor = text.startIndex
+        let plain = String(attr.characters)
+        let matches = regex.matches(in: plain, range: NSRange(plain.startIndex..., in: plain))
         for match in matches {
-            guard let range = Range(match.range, in: text),
-                  let tokenRange = Range(match.range(at: 1), in: text) else { continue }
-            if cursor < range.lowerBound {
-                result = result + Text(String(text[cursor..<range.lowerBound]))
-            }
-            let token = String(text[tokenRange])
+            guard let swiftRange = Range(match.range, in: plain),
+                  let attrRange = Range(swiftRange, in: attr),
+                  let tokenSwiftRange = Range(match.range(at: 1), in: plain) else { continue }
+            let token = String(plain[tokenSwiftRange])
             if let resolved = mentionResolve(token: token) {
-                result = result + Text("@\(resolved.label)")
-                    .foregroundStyle(resolved.color)
-                    .bold()
-            } else {
-                result = result + Text(String(text[range]))
+                attr[attrRange].foregroundColor = resolved.color
+                attr[attrRange].font = .ccSerifAdaptive(size: bodySize, weight: .semibold)
             }
-            cursor = range.upperBound
         }
-        if cursor < text.endIndex {
-            result = result + Text(String(text[cursor..<text.endIndex]))
-        }
-        return result
+        return attr
     }
 
     /// Build 220 item 10 — token → (canonical displayName, member uiColor) 解析.
@@ -1297,6 +1292,10 @@ private struct GroupInputBar: View {
     let onPlusCamera: () -> Void
     let onImage: () -> Void
 
+    // r4-3: placeholder 同 ChatView 一组随机 (init 锁 不每帧动)
+    private static let placeholders = ["Waiting…", "I'm here", "Listening", "Tell me", "Say something", "Anything on your mind", "What's up", "Type to chat", "Yes?"]
+    @State private var storedPlaceholder: String = GroupInputBar.placeholders.randomElement() ?? "Waiting…"
+
     private var hasContent: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1334,7 +1333,7 @@ private struct GroupInputBar: View {
             .disabled(sending)
 
             ZStack(alignment: .trailing) {
-                TextField("艾特一个 AI 派活", text: $draft, axis: .vertical)
+                TextField(storedPlaceholder, text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .font(.system(size: 17))
                     .tint(Color.ccAccent)
@@ -1370,6 +1369,9 @@ private struct GroupInputBar: View {
         }
         .padding(10)
         .background(Color.ccBg)
+        .onAppear {
+            storedPlaceholder = GroupInputBar.placeholders.randomElement() ?? "输入消息"
+        }
     }
 }
 
