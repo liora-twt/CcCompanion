@@ -339,6 +339,10 @@ struct CcSettingsView: View {
     @AppStorage("enable_decision_haptic") private var enableDecisionHaptic: Bool = true
     @AppStorage("feature_group_view") private var featureGroupView: Bool = false
     @AppStorage("group_name") private var groupName: String = "群聊"
+    // Build 215 S1 — 群聊背景图 disk path (跟 chat 背景独立)
+    @AppStorage("group_chat_background_path") private var groupChatBackgroundPath: String = ""
+    // Build 215 S2 — 群聊整体头像 (group-level, 跟 per-member 头像独立)
+    @AppStorage("group_avatar_path") private var groupAvatarPath: String = ""
     @AppStorage("chat_font_size_level") private var chatFontLevel: String = "medium"
     // Phase D 2026-05-11 — "仿 cc 终端文字" default true (旧行为). 关掉显示 "[AI名字] 正在输入..."
     @AppStorage("typing_verbs_enabled") private var typingVerbsEnabled: Bool = true
@@ -352,6 +356,11 @@ struct CcSettingsView: View {
 
     @State private var actionToast: String = ""
     @State private var showHapticInfo: Bool = false
+    // Build 215 S2 — 群聊编辑 sheet 状态
+    @State private var showGroupSettingsEdit: Bool = false
+    // Build 215 S1 — 群聊背景 PHPicker state
+    @State private var groupBgPickerPresented: Bool = false
+    @State private var groupBgRefreshTick: Int = 0
 
     // Phase multi-server fallback (2026-05-11) — endpoints UI state
     @ObservedObject private var resolver = EndpointResolver.shared
@@ -381,6 +390,9 @@ struct CcSettingsView: View {
     private static let aiAvatarFilename = "cccAvatarAI.png"
     private static let userAvatarFilename = "cccAvatarUser.png"
     private static let chatBackgroundFilename = "cccChatBackground.png"
+    // Build 215 S1/S2 — 群聊背景 + 群聊整体头像 filename
+    private static let groupChatBackgroundFilename = "cccGroupChatBackground.png"
+    private static let groupAvatarFilename = "cccGroupAvatar.png"
 
     private var groupConfigMembers: [GroupMember] {
         ["amian", "opia", "di", "shu", "sonnet", "opus47_fresh", "fresh"].compactMap { id in
@@ -559,6 +571,47 @@ struct CcSettingsView: View {
         } message: {
             Text("当 Claude Code 在终端等你按 y/n 同意时（例如 proceed?、continue?、[y/n]、✏️ 编辑提示等），会触发一次短触感和提示音。帮你切到别的 App 时不漏掉 prompt。\n\n关掉就只看屏幕，不振不响。")
         }
+        // Build 215 S2 — 群聊编辑 sheet (头像 + 名称 同时编辑, 保存才落)
+        .sheet(isPresented: $showGroupSettingsEdit) {
+            GroupSettingsEditSheet(
+                groupName: groupName,
+                groupAvatarPath: groupAvatarPath,
+                avatarFilename: Self.groupAvatarFilename,
+                onSave: { newName, newAvatarPath in
+                    let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    groupName = trimmed.isEmpty ? "群聊" : trimmed
+                    if let path = newAvatarPath {
+                        groupAvatarPath = path
+                    }
+                    actionToast = "群聊设置已保存"
+                    showGroupSettingsEdit = false
+                    NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
+                },
+                onClearAvatar: {
+                    if !groupAvatarPath.isEmpty {
+                        AvatarDiskStore.remove(storedValue: groupAvatarPath)
+                        groupAvatarPath = ""
+                    }
+                },
+                onCancel: { showGroupSettingsEdit = false }
+            )
+        }
+        // Build 215 S1 — 群聊背景 PHPicker
+        .sheet(isPresented: $groupBgPickerPresented) {
+            AvatarPHPicker { img in
+                groupBgPickerPresented = false
+                if let img {
+                    let resized = downscaleForBackground(img)
+                    if let storedFilename = AvatarDiskStore.save(resized, filename: Self.groupChatBackgroundFilename) {
+                        groupChatBackgroundPath = storedFilename
+                        groupBgRefreshTick &+= 1
+                        actionToast = "群聊背景已存"
+                    } else {
+                        actionToast = "背景保存失败"
+                    }
+                }
+            }
+        }
         // Phase multi-server fallback — endpoint editor sheet
         .sheet(item: $editingEndpoint) { edit in
             EndpointEditorSheet(initial: edit) { saved in
@@ -662,13 +715,11 @@ struct CcSettingsView: View {
     @ViewBuilder
     private var groupConfigSection: some View {
         section("群聊") {
-            rowToggleableText(label: "群名称") {
-                TextField("群聊", text: $groupName)
-                    .textFieldStyle(.plain)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(Color.ccAccent)
-                    .multilineTextAlignment(.trailing)
-            }
+            // Build 215 S2 — 简化: 名称 + 头像缩略 + "编辑"按钮 一行 → 弹 sheet 同时编辑头像/名称
+            groupHeaderRow
+
+            // Build 215 S1 — 群聊背景行 (复用 chatBackgroundRow pattern 但绑 groupChatBackgroundPath)
+            groupBackgroundRow
 
             ForEach(groupConfigMembers) { member in
                 groupAvatarRow(member: member)
@@ -676,7 +727,114 @@ struct CcSettingsView: View {
 
             toggleRow("群聊视图", binding: $featureGroupView)
         }
-        .id("group-config-\(groupAvatarRefreshTick)")
+        .id("group-config-\(groupAvatarRefreshTick)-\(groupBgRefreshTick)")
+    }
+
+    // Build 215 S2 — 群聊主 row (头像 + 名称 + 编辑入口)
+    @ViewBuilder
+    private var groupHeaderRow: some View {
+        Button {
+            showGroupSettingsEdit = true
+        } label: {
+            HStack(spacing: 10) {
+                groupAvatarThumb
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.ccAccent.opacity(0.25), lineWidth: 1))
+                Text(groupName.isEmpty ? "群聊" : groupName)
+                    .font(.ccSerifAdaptive(size: 15))
+                    .foregroundStyle(Color.ccText)
+                Spacer()
+                Text("编辑")
+                    .font(.ccSerifAdaptive(size: 12))
+                    .foregroundStyle(Color.ccAccent)
+                Image(systemName: "chevron.right")
+                    .font(.ccSerifAdaptive(size: 11))
+                    .foregroundStyle(Color.ccTextDim)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(Rectangle().fill(Color.ccTextDim.opacity(0.1)).frame(height: 0.5), alignment: .bottom)
+    }
+
+    @ViewBuilder
+    private var groupAvatarThumb: some View {
+        if !groupAvatarPath.isEmpty, let img = AvatarDiskStore.load(storedValue: groupAvatarPath) {
+            Image(uiImage: img).resizable().scaledToFill()
+        } else {
+            ZStack {
+                Circle().fill(Color.ccAccent.opacity(0.15))
+                Image(systemName: "person.3.sequence.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.ccAccent)
+            }
+        }
+    }
+
+    // Build 215 S1 — 群聊背景 row (复用 chatBackgroundRow pattern)
+    @ViewBuilder
+    private var groupBackgroundRow: some View {
+        VStack(spacing: 0) {
+            Button {
+                groupBgPickerPresented = true
+            } label: {
+                HStack {
+                    Text("群聊背景")
+                        .font(.ccSerifAdaptive(size: 15))
+                        .foregroundStyle(Color.ccText)
+                    Spacer()
+                    groupBgThumbnail
+                        .frame(width: 44, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.ccAccent.opacity(0.25), lineWidth: 1))
+                    Text(groupChatBackgroundPath.isEmpty ? "选择" : "更换")
+                        .font(.ccSerifAdaptive(size: 12))
+                        .foregroundStyle(Color.ccAccent)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .overlay(Rectangle().fill(Color.ccTextDim.opacity(0.1)).frame(height: 0.5), alignment: .bottom)
+            if !groupChatBackgroundPath.isEmpty {
+                Button {
+                    AvatarDiskStore.remove(storedValue: groupChatBackgroundPath)
+                    groupChatBackgroundPath = ""
+                    groupBgRefreshTick &+= 1
+                    actionToast = "群聊背景已恢复默认"
+                } label: {
+                    HStack {
+                        Text("恢复默认 (走主题色)")
+                            .font(.ccSerifAdaptive(size: 14))
+                            .foregroundStyle(Color.ccTextDim)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var groupBgThumbnail: some View {
+        if !groupChatBackgroundPath.isEmpty, let img = AvatarDiskStore.load(storedValue: groupChatBackgroundPath) {
+            Image(uiImage: img).resizable().scaledToFill()
+        } else {
+            ZStack {
+                Color.ccCard
+                Image(systemName: "photo")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.ccTextDim)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1242,6 +1400,126 @@ struct EndpointEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { onSave(initial) }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Group Settings Edit Sheet (build 215 S2)
+
+/// 群聊整体设置编辑面板 — 头像 + 名称 同时编辑, "保存"才落盘.
+/// 编辑期 draft 跟现状分离, 取消不动 AppStorage.
+struct GroupSettingsEditSheet: View {
+    let groupName: String
+    let groupAvatarPath: String
+    let avatarFilename: String
+    let onSave: (String, String?) -> Void
+    let onClearAvatar: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var draftName: String = ""
+    @State private var draftAvatarPath: String? = nil
+    @State private var pickerPresented: Bool = false
+    @State private var pickedImage: UIImage? = nil
+    @State private var cropPresented: Bool = false
+
+    private var currentAvatarPath: String {
+        draftAvatarPath ?? groupAvatarPath
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("头像") {
+                    HStack(spacing: 14) {
+                        avatarThumb
+                            .frame(width: 64, height: 64)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.ccAccent.opacity(0.3), lineWidth: 1))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button {
+                                pickerPresented = true
+                            } label: {
+                                Label(currentAvatarPath.isEmpty ? "选择头像" : "更换头像", systemImage: "photo.on.rectangle")
+                            }
+                            if !currentAvatarPath.isEmpty {
+                                Button(role: .destructive) {
+                                    draftAvatarPath = ""
+                                    onClearAvatar()
+                                } label: {
+                                    Label("恢复默认", systemImage: "arrow.uturn.backward")
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Section("名称") {
+                    TextField("群聊", text: $draftName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                }
+            }
+            .navigationTitle("群聊设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(draftName, draftAvatarPath)
+                    }
+                    .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .onAppear {
+            draftName = groupName
+        }
+        .sheet(isPresented: $pickerPresented) {
+            AvatarPHPicker { img in
+                pickerPresented = false
+                if let img {
+                    pickedImage = img
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        cropPresented = true
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $cropPresented) {
+            if let img = pickedImage {
+                AvatarCropView(
+                    originalImage: img,
+                    onConfirm: { cropped in
+                        if let storedFilename = AvatarDiskStore.save(cropped, filename: avatarFilename) {
+                            draftAvatarPath = storedFilename
+                        }
+                        cropPresented = false
+                        pickedImage = nil
+                    },
+                    onCancel: {
+                        cropPresented = false
+                        pickedImage = nil
+                    }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var avatarThumb: some View {
+        let path = currentAvatarPath
+        if !path.isEmpty, let img = AvatarDiskStore.load(storedValue: path) {
+            Image(uiImage: img).resizable().scaledToFill()
+        } else {
+            ZStack {
+                Circle().fill(Color.ccAccent.opacity(0.15))
+                Image(systemName: "person.3.sequence.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Color.ccAccent)
             }
         }
     }

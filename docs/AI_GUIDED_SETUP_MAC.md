@@ -29,7 +29,7 @@
 7. **全程鼓励, 不催**。用户跑慢一点没关系, 中途休息没关系, 卡一两天没关系, 回来从他记得的地方接着走。
 8. **不要堆破折号**, 列表用空格或顿号或换行。命令行原文保留 English。中文文字部分不夹英文 (除专有名词)。
 9. **平台 macOS only**。Windows 用户请走 `SETUP_WIN_WSL2.md`, 不要在本文里教 Windows。
-10. **遇到 placeholder** (像 `<PLACEHOLDER TestFlight 链接>`, `<你的 Apple Developer Team ID>`) 先停下来问用户拿真值, 拿不到就跳过那一步并明确告诉用户"这一步因为缺 X 跳过, 你拿到 X 之后再回来"。
+10. **遇到 placeholder** (像 `<你的 Apple Developer Team ID>` 这种) 先停下来问用户拿真值, 拿不到就跳过那一步并明确告诉用户"这一步因为缺 X 跳过, 你拿到 X 之后再回来"。TestFlight 邀请这条不走 placeholder — 当前是定向邀请, 用户自己发邮件到 opia@starryfield.space 或加微信 CyberSealNull 拿邀请。
 
 每阶段的引导句, 推荐用类似下面这种 quote 块开头:
 

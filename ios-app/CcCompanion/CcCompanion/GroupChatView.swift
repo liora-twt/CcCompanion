@@ -2,15 +2,17 @@
 //  GroupChatView.swift
 //  CcCompanion
 //
-//  Workgroup chat view (build 214 — 输入框 + agent picker + 视觉对齐 ChatView).
+//  Workgroup chat view (build 215 — input parity + bg + contextMenu + scroll-on-focus).
 //
 
 import SwiftUI
 
 struct GroupChatView: View {
-    @StateObject private var store = GroupStore()
+    @ObservedObject var store: GroupStore
     @AppStorage("group_name") private var groupName: String = "群聊"
     @AppStorage("chat_font_size_level") private var chatFontLevel: String = "medium"
+    // Build 215 S1 — 群聊自定义背景, 跟 chat_background_path 独立 key
+    @AppStorage("group_chat_background_path") private var groupBackgroundPath: String = ""
     @State private var searchVisible = false
     @State private var searchText = ""
     @State private var showFavorites = false
@@ -42,7 +44,6 @@ struct GroupChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Build 214 T4 — 自画 header (照 ChatView 模式)
             customHeader
 
             GroupChatStatusStrip(store: store)
@@ -80,7 +81,9 @@ struct GroupChatView: View {
                                     isFavorite: favoriteMessageIds.contains(message.id),
                                     onToggleFavorite: {
                                         toggleFavorite(message: message, member: member)
-                                    }
+                                    },
+                                    onQuote: { quoteMessage(message, member: member) },
+                                    onDelete: { /* T4 stub — server 端删消息单独 spec */ }
                                 )
                                     .id(message.id)
                             }
@@ -94,7 +97,10 @@ struct GroupChatView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                 }
-                .background(Color.ccBg)
+                // Build 215 S1 — bg image 存在时走 clear 透出 image, 否则走 ccBg
+                .background(groupBackgroundPath.isEmpty ? Color.ccBg : Color.clear)
+                .refreshable { await store.refreshNow() }
+                .scrollDismissesKeyboard(.immediately)
                 .onChange(of: store.messages.last?.id) { _, id in
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.22)) {
@@ -105,6 +111,15 @@ struct GroupChatView: View {
                     guard !marker.isEmpty else { return }
                     withAnimation(.easeOut(duration: 0.22)) {
                         proxy.scrollTo("typing-indicator", anchor: .bottom)
+                    }
+                }
+                // Build 215 T3 — 点输入栏聚焦时自动 scroll 到底
+                .onChange(of: inputFocused) { _, focused in
+                    guard focused, let id = store.messages.last?.id else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            proxy.scrollTo(id, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -118,7 +133,6 @@ struct GroupChatView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Build 214 T1 — input bar
             GroupInputBar(
                 draft: $draftText,
                 sending: $sending,
@@ -136,7 +150,23 @@ struct GroupChatView: View {
                 }
             )
         }
-        .background(Color.ccBg)
+        // Build 215 S1 — 顶层 ZStack 加群聊背景图渲染 (复用 ChatView 模式)
+        .background(
+            ZStack {
+                Color.ccBg
+                #if canImport(UIKit)
+                if !groupBackgroundPath.isEmpty,
+                   let img = AvatarDiskStore.load(storedValue: groupBackgroundPath) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
+                #endif
+            }
+            .id(groupBackgroundPath)
+        )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
@@ -152,12 +182,13 @@ struct GroupChatView: View {
         .onAppear {
             favoriteMessageIds = GroupFavoritesStore.ids()
             store.start()
+            // Build 215 T1 — 用户进入群聊 tab 视为已读, 清未读 / mention 计数
+            store.markAllRead()
         }
-        .onDisappear { store.stop() }
+        .onDisappear { store.snapshotLastSeen() }
         .onReceive(NotificationCenter.default.publisher(for: .ccGroupFavoritesDidChange)) { _ in
             favoriteMessageIds = GroupFavoritesStore.ids()
         }
-        .refreshable { await store.refreshNow() }
     }
 
     @ViewBuilder
@@ -225,8 +256,14 @@ struct GroupChatView: View {
         CcToastBus.shared.show(isNowFavorite ? "已收藏群聊消息" : "已取消收藏")
     }
 
-    // Build 214 T1 — 在 draftText 当前末尾插入 @displayName (含尾空格).
-    // SwiftUI TextField 不暴露 cursor 位置 — 直接 append, 跟 iOS 微信/Telegram pattern 一致.
+    // Build 215 T4 — 引用回复. 没有 reply_to 后端支持时, 直接在 draft 头部插一段 "> @sender: ..." 引文.
+    private func quoteMessage(_ message: GroupMessage, member: GroupMember) {
+        let snippet = message.text.prefix(80).replacingOccurrences(of: "\n", with: " ")
+        let prefix = "> @\(member.displayName): \(snippet)\n"
+        draftText = prefix + draftText
+        inputFocused = true
+    }
+
     private func insertMention(member: GroupMember) {
         let token = "@\(member.displayName) "
         if draftText.isEmpty {
@@ -258,7 +295,6 @@ struct GroupChatView: View {
         }
     }
 
-    /// 把消息文本里 @xxx 解析成 agent id list. 匹配 displayName 跟 id 两种.
     private func resolveMentions(in text: String) -> [String] {
         let pattern = #"@([A-Za-z0-9_\-]+|[\u{4E00}-\u{9FFF}]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -283,6 +319,7 @@ private struct GroupChatStatusStrip: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Build 215 T5 — 横向 ScrollView, 不挂任何 .draggable / DragGesture, 元素不能被拖动只能滑.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(statusMembers) { member in
@@ -294,7 +331,7 @@ private struct GroupChatStatusStrip: View {
                             Text(member.title)
                                 .font(.ccSerifAdaptive(size: 12, weight: .semibold))
                                 .foregroundStyle(Color.ccText)
-                            // Build 214 T2 — agent 名字后带模型名 半透明小字
+                            // Build 214 T2 — agent 名字后带模型名 半透明小字 (status strip 保留 model)
                             if let model = member.model, !model.isEmpty {
                                 Text("· \(model)")
                                     .font(.ccSerifAdaptive(size: 11))
@@ -342,6 +379,8 @@ private struct GroupMessageRow: View {
     let bodySize: CGFloat
     let isFavorite: Bool
     let onToggleFavorite: () -> Void
+    let onQuote: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -357,7 +396,7 @@ private struct GroupMessageRow: View {
                     Text(member.title)
                         .font(.ccSerifAdaptive(size: 12, weight: .semibold))
                         .foregroundStyle(Color.ccTextDim)
-                    // Build 214 T2 — name · model
+                    // Build 214 T2 — name · model (message row 保留 model)
                     if let model = member.model, !model.isEmpty {
                         Text("· \(model)")
                             .font(.ccSerifAdaptive(size: 11))
@@ -370,7 +409,6 @@ private struct GroupMessageRow: View {
                     if !message.isHumanSender { messageTypeBadge }
                 }
 
-                // Build 214 T4 — 字号/bubble 对齐 ChatView (chatBodySize / cornerRadius 14 / pad 12,8)
                 highlightedText(message.text)
                     .font(.ccSerifAdaptive(size: bodySize))
                     .foregroundStyle(Color.ccText)
@@ -396,9 +434,26 @@ private struct GroupMessageRow: View {
 
             if !message.isHumanSender { Spacer(minLength: 46) }
         }
+        // Build 215 T4 — contextMenu copy chat 子集 (复制 / 引用 / 收藏 / 分享 / 删除)
         .contextMenu {
+            Button {
+                #if canImport(UIKit)
+                UIPasteboard.general.string = message.text
+                #endif
+            } label: {
+                Label("复制", systemImage: "doc.on.doc")
+            }
+            Button(action: onQuote) {
+                Label("引用回复", systemImage: "quote.bubble")
+            }
             Button(action: onToggleFavorite) {
                 Label(isFavorite ? "取消收藏" : "收藏", systemImage: isFavorite ? "star.slash" : "star")
+            }
+            ShareLink(item: message.text) {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            Button(role: .destructive, action: onDelete) {
+                Label("删除", systemImage: "trash")
             }
         }
     }
@@ -471,7 +526,8 @@ private struct GroupTypingIndicator: View {
             ForEach(members.prefix(3)) { member in
                 GroupAvatarView(member: member, size: 26)
             }
-            Text("\(joinedLabel) 正在输入")
+            // Build 215 T2 — typing indicator 只 title 不带 model (阿眠拍 model 噪声大)
+            Text("\(members.map(\.title).joined(separator: "、")) 正在输入")
                 .font(.ccSerifAdaptive(size: 13))
                 .foregroundStyle(Color.ccTextDim)
             GroupTypingDots()
@@ -480,16 +536,6 @@ private struct GroupTypingIndicator: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.ccCard.opacity(0.72)))
-    }
-
-    /// Build 214 T2 — typing 行 agent 名字后带模型名 (有 model 才显示 · model).
-    private var joinedLabel: String {
-        members.map { member -> String in
-            if let model = member.model, !model.isEmpty {
-                return "\(member.title) · \(model)"
-            }
-            return member.title
-        }.joined(separator: "、")
     }
 }
 
@@ -508,7 +554,7 @@ private struct GroupTypingDots: View {
     }
 }
 
-// MARK: - Input Bar (build 214 T1)
+// MARK: - Input Bar (build 215 T7 — icon 顺序对齐 ChatInputBar)
 
 private struct GroupInputBar: View {
     @Binding var draft: String
@@ -524,15 +570,13 @@ private struct GroupInputBar: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    // Build 215 T7 — 顺序对齐 ChatInputBar: 加号 → 图片 → @ → TextField+mic → 发送
+    // 之前是 加号 → @ → TextField → 图片 → 发送 把图片挤到右边 阿眠 catch 距离不均.
     var body: some View {
         HStack(spacing: 8) {
             Menu {
-                Button {
-                    onPlusCamera()
-                } label: { Label("拍照", systemImage: "camera") }
-                Button {
-                    onPlusFile()
-                } label: { Label("文件", systemImage: "doc") }
+                Button { onPlusCamera() } label: { Label("拍照", systemImage: "camera") }
+                Button { onPlusFile() } label: { Label("文件", systemImage: "doc") }
             } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.ccSerifAdaptive(size: 28, weight: .bold))
@@ -540,10 +584,16 @@ private struct GroupInputBar: View {
             }
             .disabled(sending)
 
-            // @ button — picker
-            Button {
-                onAt()
-            } label: {
+            // 图片按钮 — 摘出加号菜单, 跟 ChatInputBar 同款放第二位 (line 3223)
+            Button { onImage() } label: {
+                Image(systemName: "photo.fill")
+                    .font(.ccSerifAdaptive(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.ccTextDim)
+            }
+            .disabled(sending)
+
+            // @ 按钮 — 群聊特有, 跟 ChatInputBar 图片按钮平级
+            Button { onAt() } label: {
                 Image(systemName: "at")
                     .font(.ccSerifAdaptive(size: 22, weight: .semibold))
                     .foregroundStyle(Color.ccTextDim)
@@ -569,7 +619,6 @@ private struct GroupInputBar: View {
                     .padding(.trailing, 40)
 
                 if !inputFocused.wrappedValue {
-                    // mic inset placeholder — 群聊暂不接语音输入 (跟 ChatView 一致样式 但 disabled).
                     Image(systemName: "mic")
                         .font(.ccSerifAdaptive(size: 17))
                         .foregroundStyle(Color.ccTextDim.opacity(0.5))
@@ -577,19 +626,7 @@ private struct GroupInputBar: View {
                 }
             }
 
-            // 图片按钮 (照 ChatInputBar 摘出加号菜单的设计)
-            Button {
-                onImage()
-            } label: {
-                Image(systemName: "photo.fill")
-                    .font(.ccSerifAdaptive(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.ccTextDim)
-            }
-            .disabled(sending)
-
-            Button {
-                onSend()
-            } label: {
+            Button { onSend() } label: {
                 Image(systemName: sending ? "ellipsis.circle" : "paperplane.fill")
                     .font(.ccSerifAdaptive(size: 20, weight: .semibold))
                     .scaleEffect(x: sending ? 1 : -1, y: 1)
@@ -654,6 +691,6 @@ private struct AgentMentionPicker: View {
 
 #Preview {
     NavigationStack {
-        GroupChatView()
+        GroupChatView(store: GroupStore())
     }
 }

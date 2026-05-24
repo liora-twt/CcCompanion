@@ -99,6 +99,15 @@ final class GroupStore: ObservableObject {
     @Published var agentStatus: [String: GroupAgentStatus] = [:]
     @Published var loading: Bool = false
     @Published var lastError: String? = nil
+    // Build 215 T1 — 客户端 unread / mention 计数. 视图 onAppear markAllRead() 清零, polling 拉到新消息 → 自增.
+    @Published var unreadCount: Int = 0
+    @Published var mentionCount: Int = 0
+    // 持久化 last_seen_ts 让 app 重启后 unread 状态可恢复 (不靠后端 endpoint).
+    private let lastSeenKey = "group_last_seen_ts"
+    private var lastSeenTs: String {
+        get { UserDefaults.standard.string(forKey: lastSeenKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: lastSeenKey) }
+    }
 
     private var pollTask: Task<Void, Never>? = nil
     private var lastTs: String? = nil
@@ -220,6 +229,40 @@ final class GroupStore: ObservableObject {
         messages = byId.values.sorted { lhs, rhs in
             if lhs.ts == rhs.ts { return lhs.id < rhs.id }
             return lhs.ts < rhs.ts
+        }
+        // Build 215 T1 — 新进来的消息按 lastSeenTs 算 unread + mention.
+        // 自己发的不算 / amian 的不算 (isHumanSender).
+        let seen = lastSeenTs
+        for r in records where !r.isHumanSender {
+            if seen.isEmpty || r.ts > seen {
+                unreadCount += 1
+                if isMentioningHuman(r) {
+                    mentionCount += 1
+                }
+            }
+        }
+    }
+
+    private func isMentioningHuman(_ message: GroupMessage) -> Bool {
+        let humanTags = ["amian", "阿眠", "User"]
+        if message.mentions.contains(where: { humanTags.contains($0) }) { return true }
+        let text = message.text
+        return humanTags.contains { text.contains("@\($0)") }
+    }
+
+    /// Build 215 T1 — 视图打开 / 重新进入群聊 tab 时调. 清 unread + mention 计数并记最新 lastSeenTs.
+    func markAllRead() {
+        unreadCount = 0
+        mentionCount = 0
+        if let latest = messages.last?.ts, !latest.isEmpty {
+            lastSeenTs = latest
+        }
+    }
+
+    /// 视图消失时存当前最新 ts 当 seen baseline. 下次新消息进来才算 unread.
+    func snapshotLastSeen() {
+        if let latest = messages.last?.ts, !latest.isEmpty {
+            lastSeenTs = latest
         }
     }
 }

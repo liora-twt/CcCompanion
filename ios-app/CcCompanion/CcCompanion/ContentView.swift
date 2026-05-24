@@ -53,6 +53,9 @@ struct ContentView: View {
     @State private var chatScrollToken: Int = 0
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var theme = ThemeStore.shared
+    // Build 215 T1 — GroupStore 提到 ContentView 层 让 tab badge 能读 unread / mention 计数.
+    // GroupChatView 接受 @ObservedObject 共用同一个实例 (避免双 store 双 polling).
+    @StateObject private var groupStore = GroupStore()
     @AppStorage("cc_onboarding_completed") private var onboardingCompleted: Bool = false
     @AppStorage("feature_group_view") private var featureGroupView: Bool = false
 
@@ -62,12 +65,19 @@ struct ContentView: View {
         return host == "example.com" || host.isEmpty
     }
 
+    private var groupTabBadge: BadgeStyle {
+        // Build 215 T1 — mention > 0 红 @ 升级版 / 无 mention 但有 unread 红圆点 / 都没 none
+        if groupStore.mentionCount > 0 { return .mentionAt }
+        if groupStore.unreadCount > 0 { return .unreadDot }
+        return .none
+    }
+
     private var tabs: [FloatingTabBarItem] {
         var items: [FloatingTabBarItem] = [
             .init(id: 0, title: "聊天", systemImage: "bubble.left.and.bubble.right"),
         ]
         if featureGroupView {
-            items.append(.init(id: 3, title: "群聊", systemImage: "person.3.sequence.fill"))
+            items.append(.init(id: 3, title: "群聊", systemImage: "person.3.sequence.fill", badge: groupTabBadge))
         }
         items.append(.init(id: 1, title: "终端", systemImage: "terminal"))
         items.append(.init(id: 2, title: "设置", systemImage: "gearshape.fill"))
@@ -82,7 +92,7 @@ struct ContentView: View {
                 case 0: NavigationStack { ChatView(onShowFavorites: { showFavorites = true }, scrollToken: chatScrollToken) }
                 case 1: NavigationStack { TerminalView() }
                 case 2: NavigationStack { CcSettingsView() }
-                case 3 where featureGroupView: NavigationStack { GroupChatView() }
+                case 3 where featureGroupView: NavigationStack { GroupChatView(store: groupStore) }
                 default: NavigationStack { ChatView(onShowFavorites: { showFavorites = true }, scrollToken: chatScrollToken) }
                 }
             }
@@ -107,6 +117,17 @@ struct ContentView: View {
         .task {
             // Phase multi-server fallback — kick off endpoint resolver (background ping every 60s).
             EndpointResolver.shared.start()
+            // Build 215 T1 — featureGroupView 开关下后台跑 group polling, tab badge 才能在用户不进群聊 tab 时增长
+            if featureGroupView {
+                groupStore.start()
+            }
+        }
+        .onChange(of: featureGroupView) { _, enabled in
+            if enabled {
+                groupStore.start()
+            } else {
+                groupStore.stop()
+            }
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == 0 { chatScrollToken &+= 1 }

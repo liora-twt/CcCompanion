@@ -14,7 +14,7 @@ English: [README.en.md](README.en.md)
 
 CcCompanion 两块:
 
-1. **`ios-app/`** — SwiftUI 写的 iOS app (TestFlight 公开, 后续上 App Store), 给你 chat / terminal / 斜杠命令三件套, 在 iPhone 上接你 Mac 那边的 Claude Code session, 走 overlay 网络任何地方都能用。
+1. **`ios-app/`** — SwiftUI 写的 iOS app (TestFlight 定向邀请, 后续上 App Store), 给你 chat / terminal / 斜杠命令三件套, 在 iPhone 上接你 Mac 那边的 Claude Code session, 走 overlay 网络任何地方都能用。
 2. **`apns-server/`** — Mac 上跑的 Python HTTP 服务, 把你发的 chat 转给本地 `tmux` 里的 `claude`, 抓回复, 通过 Apple Push (或者 [Bark](https://github.com/Finb/Bark) 作零 Apple Developer 兜底) 推回你 iPhone。
 
 整套是 **local-first** — 你的消息不过我们的 server, 因为根本没"我们的 server"。家里那台 Mac 跟你 iPhone 走 Tailscale / ZeroTier / LAN 直连。
