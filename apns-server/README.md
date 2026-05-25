@@ -150,6 +150,40 @@ cd apns-server
 - `config.toml` `host = "0.0.0.0"` (绑所有网卡), 不是 `127.0.0.1`
 - iPhone 端 server URL 用 overlay IP (Tailscale `100.x` 之类), 不是 `127.0.0.1`
 
+### Custom group member appears in UI but messages don't reach its tmux
+
+The iOS settings UI can add a custom group member through `/group/members/add`. The server stores those edits under:
+
+```bash
+apns-server/user_overrides/group_member_additions.json
+```
+
+Anything that routes messages to that member must use the same member source as this server. If a separate dispatcher reads another checkout or another `user_overrides/` directory, the member can appear in the iOS UI while its tmux session receives nothing.
+
+Verify the route in four steps:
+
+```bash
+# 1. Server persistence: confirm the member was written.
+python3 -m json.tool apns-server/user_overrides/group_member_additions.json
+
+# 2. Server roster: confirm the live server returns the member.
+curl -s "$SERVER/group/roster" \
+  -H "X-Auth-Token: $SECRET" | grep '<member-id>'
+
+# 3. Tmux target: confirm the configured tmux session exists.
+tmux has-session -t '<tmux-session>'
+
+# 4. Route test: confirm /group/send targets the member.
+curl -s -X POST "$SERVER/group/send" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: $SECRET" \
+  -d '{"sender_id":"user","mentions":["<member-id>"],"text":"@<member-id> route test"}'
+```
+
+Expected result: step 2 shows the member, step 3 exits successfully, and step 4 returns the member id in `targets` or `delivery.delivered`.
+
+If step 1 fails, the add-member request did not persist. If step 2 fails, restart the server or inspect `apns-server/user_overrides/`. If step 3 fails, start the tmux session named in that member's config. If step 4 has an empty `targets` list, the mention id does not match the roster id.
+
 ---
 
 ## File layout

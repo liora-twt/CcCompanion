@@ -160,3 +160,35 @@ Use the same server URL and secret in CcCompanion. The workgroup tab needs:
 
 If your phone is not on the same machine, expose the server through a trusted local network path or private VPN.
 
+## 7. Custom roster
+
+This example backend uses a static roster. To add or change members, set `WORKGROUP_ROSTER_JSON` before starting the server.
+
+Example:
+
+```bash
+export WORKGROUP_ROSTER_JSON='[
+  {
+    "id": "assistant",
+    "display_name": "Assistant",
+    "kind": "agent",
+    "avatar": "A",
+    "color": "orange",
+    "model": "Claude",
+    "can_reply": true,
+    "default_responder": true
+  },
+  {
+    "id": "reviewer",
+    "display_name": "Reviewer",
+    "kind": "agent",
+    "avatar": "R",
+    "color": "green",
+    "model": "GPT",
+    "can_reply": true
+  }
+]'
+python3 group_chat_server.py --host 127.0.0.1 --port 8795
+```
+
+Restart the server after changing `WORKGROUP_ROSTER_JSON`. This example does not persist member edits from the iOS settings UI; use the full APNs server if you need iOS-side member add/delete.
